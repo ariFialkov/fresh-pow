@@ -7,7 +7,7 @@ import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
-import { SprayPool, Trail } from './snowfx.js';
+import { SprayPool, GearTrails } from './snowfx.js';
 import { mulberry32, smoothstep } from './rng.js';
 import { drawOutcome, multiplierFor } from './rtp.js';
 import { state, save } from './state.js';
@@ -46,7 +46,7 @@ export class RaceScene {
     const playerLane = this.terrain.gateLanes[2];
     this.player.placeAt(playerLane.x, playerLane.z);
     this.scene.add(this.player.obj);
-    this.playerTrail = new Trail(this.scene, this.terrain, opts.gear.type === 'ski' ? 0.3 : 0.36);
+    this.playerTrail = new GearTrails(this.scene, this.terrain, opts.gear);
 
     this.bots = opts.bots.map((b, i) => {
       const rank = this.outcome.botPositions[i];
@@ -71,7 +71,7 @@ export class RaceScene {
         lane: this.terrain.gateLanes[b.lane],
       });
       this.scene.add(bot.obj);
-      bot.trail = new Trail(this.scene, this.terrain);
+      bot.trail = new GearTrails(this.scene, this.terrain, b.gear);
       return bot;
     });
 
@@ -122,10 +122,15 @@ export class RaceScene {
       else this.playerStallTime = 0;
 
       this.player.update(dt);
-      this.playerTrail.push(this.player.pos.x, this.player.pos.z, !this.player.airborne);
+      this.playerTrail.push(this.player.pos.x, this.player.pos.z, this.player.yaw, !this.player.airborne);
       for (const b of this.bots) {
         b.update(dt, this);
-        b.trail.push(b.obj.position.x, b.obj.position.z, b.y <= this.terrain.heightAt(b.obj.position.x, b.obj.position.z) + 0.25);
+        b.trail.push(
+          b.obj.position.x,
+          b.obj.position.z,
+          b.visYaw || 0,
+          b.y <= this.terrain.heightAt(b.obj.position.x, b.obj.position.z) + 0.25
+        );
       }
       this._resolveRiderCollisions(dt);
       this._enforceDrawnOrder(dt);
@@ -266,9 +271,9 @@ export class RaceScene {
 
   _updateCamera(dt, snap) {
     const p = this.player.pos;
-    // tight, steady chase: shallow yaw coupling and slow smoothing so the
-    // camera glides instead of whipping with every carve
-    const yaw = this.player.yaw * 0.32;
+    // tight, steady chase behind the direction of TRAVEL (not the board),
+    // so drifts read as the board swinging out across the screen
+    const yaw = this.player.travelYaw * 0.4;
     const back = 7.0;
     const target = new THREE.Vector3(
       p.x - Math.sin(yaw) * back,

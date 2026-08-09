@@ -339,7 +339,7 @@ export function createRider(gear, helmetColor) {
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
-    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0 },
+    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0 },
   };
   setPose(rider, { idle: true, t: 0, dt: 1 }); // dt=1 converges the damping instantly
   return rider;
@@ -368,7 +368,9 @@ export function setPose(rider, p = {}) {
   S.knocked = ease(S.knocked, p.knocked ?? 0, 9);
   S.crouch = ease(S.crouch, p.crouch ?? 0, 10);
   S.air = ease(S.air, p.airborne ? 1 : 0, 6);
+  S.shift = ease(S.shift, p.shift ?? 0, 4.5); // fore/aft weight over the deck
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
+  const shift = S.shift;
   const brake = S.brakeIn;
   const airborne = !!p.airborne;
   const idle = !!p.idle;
@@ -447,12 +449,14 @@ export function setPose(rider, p = {}) {
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
   PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 - air * 0.12 - knocked * 0.35);
+  // center of gravity slides fore/aft over the deck with the weight shift
+  parts.pelvis.position.z += (-shift * 0.11 - parts.pelvis.position.z) * dmp;
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
   RY(parts.pelvis, pelvisYaw);
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5;
+    : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5 + shift * 0.22;
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look

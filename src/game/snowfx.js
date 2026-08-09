@@ -123,6 +123,39 @@ export class SprayPool {
   }
 }
 
+/**
+ * Vehicle-accurate track sets: twin lines for skis, a single band for boards,
+ * runner tracks for toboggans, one wide groove for saucers. Offsets are laid
+ * perpendicular to the rider's heading, so drifting sideways leaves angled,
+ * separated tracks just like a real slide.
+ */
+export class GearTrails {
+  constructor(scene, terrain, gear) {
+    const specs =
+      gear.type === 'ski'
+        ? [{ off: -0.11, w: 0.055 }, { off: 0.11, w: 0.055 }]
+        : gear.type === 'board'
+          ? [{ off: 0, w: 0.16 }]
+          : gear.id === 'sled-saucer'
+            ? [{ off: 0, w: 0.36 }]
+            : [{ off: -0.21, w: 0.045 }, { off: 0.21, w: 0.045 }];
+    this.tracks = specs.map((s) => ({ off: s.off, trail: new Trail(scene, terrain, s.w) }));
+  }
+
+  /** yaw = the vehicle's heading (rotation convention: forward = -z at 0). */
+  push(x, z, yaw, grounded) {
+    const rx = Math.cos(yaw);
+    const rz = Math.sin(yaw);
+    for (const t of this.tracks) {
+      t.trail.push(x + rx * t.off, z + rz * t.off, grounded);
+    }
+  }
+
+  update(dt) {
+    for (const t of this.tracks) t.trail.update(dt);
+  }
+}
+
 /** A carved line pressed into the snow behind one rider. */
 export class Trail {
   constructor(scene, terrain, width = 0.34, max = 90) {
@@ -161,9 +194,10 @@ export class Trail {
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
 
-    this.trackCol = new THREE.Color(0xb4cbe2); // pressed snow, slightly blue
+    this.trackCol = new THREE.Color(0xa9c2dc); // pressed snow, slightly blue
     this.snowCol = new THREE.Color(0xf2f7fd);
     this.fadeTime = 9;
+    this.minDist = 0.9; // dense sampling keeps thin lines smooth through carves
   }
 
   push(x, z, grounded) {

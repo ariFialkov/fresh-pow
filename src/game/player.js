@@ -23,8 +23,12 @@ export class Player {
     this.rider = createRider(gear, 0xfbbf24);
     this.obj = this.rider.root;
 
+    this.isSled = gear.type === 'sled';
     this.pos = new THREE.Vector3();
-    this.yaw = 0; // 0 = straight downhill (-z)
+    this.yaw = 0; // board/ski heading, 0 = straight downhill (-z)
+    this.travelYaw = 0; // velocity direction — chases yaw at the edge's grip
+    this.latA = 0; // smoothed centripetal accel -> body lean
+    this.slip = 0; // yaw - travelYaw: the drift angle
     this.speed = 0;
     this.vy = 0;
     this.airborne = false;
@@ -106,15 +110,33 @@ export class Player {
     if (this.stumbleT > 0) this.stumbleT -= dt;
     this.landComp = Math.max(0, this.landComp - dt * 2.6);
 
-    // ---- steering ----
+    // ---- steering: the tip leads, the velocity follows ----
+    // yaw is where the board POINTS; travelYaw is where you actually GO.
+    // The gap between them is the drift angle — carving is travelYaw slowly
+    // being pulled around by the edge.
     const steerIn = stumbling ? inp.steer * 0.25 : inp.steer;
     const targetYaw = clamp(steerIn, -1, 1) * MAX_YAW;
-    this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.0 : 3.4), 0, 1));
-
-    const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.0 : 2.8), 0, 1));
 
     if (!this.airborne) {
-      // ---- slope acceleration along heading ----
+      // edge grip: strong at low speed, drifty at pace; braking and sleds
+      // break the edge loose further
+      let grip = 4.2 - 2.6 * clamp(this.speed / 40, 0, 1);
+      if (this.input.brake && !stumbling) grip *= 0.55;
+      if (this.isSled) grip *= 0.7;
+      if (stumbling) grip *= 0.7;
+      const prevTravel = this.travelYaw;
+      this.travelYaw = lerp(this.travelYaw, this.yaw, clamp(dt * grip, 0, 1));
+      const turnRate = dt > 0 ? (this.travelYaw - prevTravel) / dt : 0;
+      // centripetal accel felt by the body -> lean into the turn
+      this.latA = lerp(this.latA, this.speed * turnRate, clamp(dt * 5, 0, 1));
+    }
+    this.slip = this.yaw - this.travelYaw;
+
+    const dir = new THREE.Vector3(Math.sin(this.travelYaw), 0, -Math.cos(this.travelYaw));
+
+    if (!this.airborne) {
+      // ---- slope acceleration along the direction of travel ----
       const e = 1.6;
       const hHere = t.heightAt(this.pos.x, this.pos.z);
       const hAhead = t.heightAt(this.pos.x + dir.x * e, this.pos.z + dir.z * e);
@@ -145,8 +167,8 @@ export class Player {
         });
       }
       this._wasBraking = braking;
-      // carving scrubs a little speed
-      a -= Math.abs(this.yaw) * 0.9;
+      // the drifting edge scrubs speed — sideways is slow
+      a -= Math.abs(this.slip) * this.speed * 0.055;
 
       this.speed = Math.max(0, this.speed + a * dt);
 
@@ -221,9 +243,9 @@ export class Player {
       }
     }
 
-    // continuous powder: wake at speed, fans off carves, roost when braking
+    // continuous powder: wake at speed, roost off the drifting edge
     if (this.fx && !this.airborne && this.speed > 7) {
-      const carve = Math.abs(this.yaw) / MAX_YAW;
+      const carve = Math.abs(this.slip) * 2.2 + (Math.abs(this.yaw) / MAX_YAW) * 0.4;
       const braking = inp.brake && !stumbling ? 1 : 0;
       const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
       const rate = intensity * this.speed * 0.14;
@@ -254,8 +276,10 @@ export class Player {
     setPose(this.rider, {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
-      // lean scales with speed — slow riders stand tall, fast riders bank
-      steer: (this.yaw / MAX_YAW) * clamp(this.speed / 26, 0.15, 1),
+      // lean comes from the actual centripetal force of the carve
+      steer: clamp(this.latA / 11, -1, 1),
+      // weight shifts back over the tails as the edge drifts, forward in a tuck
+      shift: clamp((inp.tuck ? 0.45 : 0) - Math.abs(this.slip) * 1.3 - (inp.brake ? 0.5 : 0), -1, 0.5),
       stumble: this.stumbleT > 0 ? 1 : 0,
       knocked,
       airborne: this.airborne,

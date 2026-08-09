@@ -200,17 +200,20 @@ export class Bot {
     this.obj.position.set(x, this.y, z);
     if (!airborne) this.obj.position.y -= 0.06;
 
-    // heading from the line derivative
-    const ahead = 3;
-    const yaw = Math.atan2(this.lineAt(this.d + ahead) - x, ahead);
-    this.obj.rotation.y = -yaw;
+    // the tip leads: heading looks further down the line than the travel
+    // direction, so the board visibly initiates each carve
+    const visYaw = Math.atan2(this.lineAt(this.d + 7) - this.lineAt(this.d), 7);
+    this.obj.rotation.y = -visYaw;
+    this.visYaw = visYaw;
+    // body lean from the actual curvature of the line (centripetal force)
+    const curv = (this.lineAt(this.d + 5) - 2 * this.lineAt(this.d) + this.lineAt(this.d - 5)) / 25;
+    const lean = clamp(this.speed * this.speed * curv * 0.09, -1, 1);
 
     if (!airborne) {
       const n = this.terrain.normalAt(x, z);
       this.rider.rig.rotation.x = Math.atan2(-n.z, n.y) * -0.85;
     }
 
-    const carve = Math.cos(this.d * 0.03 + this.weavePhase);
     if (this.finished) {
       // brake out after the line, then stand in the corral
       setPose(this.rider, {
@@ -221,7 +224,7 @@ export class Bot {
       });
     } else {
       setPose(this.rider, {
-        steer: clamp(carve, -1, 1) * 0.7 * clamp(this.speed / 26, 0.15, 1),
+        steer: lean,
         tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
         stumble: this.stumbleT > 0 ? 1 : 0,
         knocked,
@@ -234,9 +237,9 @@ export class Bot {
 
     // powder off the carves (cheaper budget than the player's spray)
     if (race.fx && !airborne && this.speed > 10) {
-      const edge = Math.abs(carve);
+      const edge = Math.abs(lean);
       this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.05 * dt * 60;
-      const side = Math.sign(carve) || 1;
+      const side = Math.sign(lean) || 1;
       while (this._sprayAcc >= 1) {
         this._sprayAcc -= 1;
         race.fx.spawn(
