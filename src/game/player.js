@@ -273,6 +273,12 @@ export class Player {
     const bumpTarget = this.airborne ? 0 : clamp(Math.abs(this.groundVy) * 0.045, 0, 0.4);
     this.bump = lerp(this.bump, bumpTarget, clamp(dt * 5, 0, 1));
 
+    // longitudinal G: the body gets thrown forward under braking and pressed
+    // back under acceleration — the pose springs react to this
+    const rawLongA = dt > 0 ? (this.speed - (this._prevSpeed ?? this.speed)) / dt : 0;
+    this._prevSpeed = this.speed;
+    this.longA = lerp(this.longA ?? 0, clamp(rawLongA, -18, 12), clamp(dt * 7, 0, 1));
+
     setPose(this.rider, {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
@@ -285,6 +291,8 @@ export class Player {
       airborne: this.airborne,
       crouch: clamp(this.landComp + this.bump, 0, 1),
       speedNorm: clamp(this.speed / 42, 0, 1),
+      longG: clamp(this.longA / 11, -1, 1),
+      jolt: this.bump * 1.3,
       t: this.t,
       dt,
     });

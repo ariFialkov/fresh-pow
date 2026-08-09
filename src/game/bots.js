@@ -156,7 +156,9 @@ export class Bot {
     if (this.aggro > 0) this.aggro -= dt;
     if (this.knockT > 0) v = Math.min(v, 3); // down riders slide, not race
 
+    const prevSpeed = this.speed;
     this.speed = lerp(this.speed, v, clamp(dt * 2.5, 0, 1));
+    this._longA = lerp(this._longA ?? 0, dt > 0 ? clamp((this.speed - prevSpeed) / dt, -18, 12) : 0, clamp(dt * 7, 0, 1));
     this.d += this.speed * dt;
 
     // the "finishes behind" guarantee — mid-race these riders may genuinely
@@ -230,6 +232,7 @@ export class Bot {
         knocked,
         airborne,
         speedNorm: clamp(this.speed / 42, 0, 1),
+        longG: clamp((this._longA ?? 0) / 11, -1, 1),
         t: this._t + this.weavePhase,
         dt,
       });

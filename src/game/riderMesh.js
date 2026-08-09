@@ -383,12 +383,45 @@ export function setPose(rider, p = {}) {
   const idle = !!p.idle;
   const speed = p.speedNorm ?? 0;
 
-  // ---- output damping: every joint glides to its target ----
-  const dmp = 1 - Math.exp(-dt * 12);
-  const RX = (g, v) => (g.rotation.x += (v - g.rotation.x) * dmp);
-  const RY = (g, v) => (g.rotation.y += (v - g.rotation.y) * dmp);
-  const RZ = (g, v) => (g.rotation.z += (v - g.rotation.z) * dmp);
-  const PY = (g, v) => (g.position.y += (v - g.position.y) * dmp);
+  // ---- output springs: joints carry inertia. Loose parts (arms, head,
+  // poles) lag and overshoot like flesh reacting to forces; legs stay
+  // near-critical so the feet keep their plant. This is what separates
+  // "reacting to the mountain" from "leaning on cue". ----
+  const spr = (g, axis, target, om, zt) => {
+    let sv = g.userData._sv;
+    if (!sv) sv = g.userData._sv = { x: 0, y: 0, z: 0, py: 0, pz: 0 };
+    const cur = axis === 'py' ? g.position.y : axis === 'pz' ? g.position.z : g.rotation[axis];
+    if (dt > 0.2) {
+      // init/convergence call — snap, no dynamics
+      sv[axis] = 0;
+      if (axis === 'py') g.position.y = target;
+      else if (axis === 'pz') g.position.z = target;
+      else g.rotation[axis] = target;
+      return;
+    }
+    const acc = om * om * (target - cur) - 2 * zt * om * sv[axis];
+    sv[axis] += acc * dt;
+    const nv = cur + sv[axis] * dt;
+    if (axis === 'py') g.position.y = nv;
+    else if (axis === 'pz') g.position.z = nv;
+    else g.rotation[axis] = nv;
+  };
+  const RX = (g, v, om = 13, zt = 0.85) => spr(g, 'x', v, om, zt);
+  const RY = (g, v, om = 13, zt = 0.85) => spr(g, 'y', v, om, zt);
+  const RZ = (g, v, om = 13, zt = 0.85) => spr(g, 'z', v, om, zt);
+  const PY = (g, v, om = 14, zt = 0.9) => spr(g, 'py', v, om, zt);
+  const PZ = (g, v, om = 9, zt = 0.7) => spr(g, 'pz', v, om, zt);
+
+  // force-reaction channels: longitudinal G pitches the body (thrown forward
+  // under braking, pressed back under acceleration); jolt is terrain shock
+  const longG = Math.max(-1, Math.min(1, p.longG ?? 0));
+  const jolt = p.jolt ?? 0;
+  // imperfection: nobody holds a pose perfectly — tiny asymmetric sway
+  if (rider._nph === undefined) rider._nph = Math.random() * 20;
+  const ph = rider._nph;
+  const busy = idle ? 0.25 : 0.5 + speed * 0.8;
+  const swayA = (Math.sin(t * 1.13 + ph) + 0.6 * Math.sin(t * 2.71 + ph * 2)) * 0.035 * busy;
+  const swayB = (Math.sin(t * 0.97 + ph * 3) + 0.5 * Math.sin(t * 2.23 + ph)) * 0.03 * busy;
 
   const wobS = stumble * Math.sin(t * 11) * 0.32;
   const wobA = stumble * Math.sin(t * 9 + 1.3) * 0.45;
@@ -402,11 +435,11 @@ export function setPose(rider, p = {}) {
   const bkYaw = rider._brakeSide * bk;
 
   // whole-body edge angle into the turn; knocked riders lie on their side
-  RZ(rider.rig, -steer * (isSled ? 0.28 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + knocked * rider._brakeSide * 1.35);
+  RZ(rider.rig, -steer * (isSled ? 0.28 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
     // skis/board pivot across the slope to scrub speed
-    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12);
+    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12, 12, 0.8);
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
   }
@@ -414,12 +447,12 @@ export function setPose(rider, p = {}) {
   if (isSled) {
     PY(parts.pelvis, 0.34 - knocked * 0.1);
     RY(parts.pelvis, bkYaw * 0.25);
-    const spx = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + knocked * 0.4;
-    RX(parts.spine, spx);
-    RZ(parts.spine, -steer * 0.3);
-    RX(parts.chest, 0.1 + brake * -0.15 + tuck * 0.2);
-    RX(parts.neck, -(spx + 0.1) * 0.7);
-    RZ(parts.neck, steer * 0.22);
+    const spx = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + longG * -0.3 + swayB * 0.5 + knocked * 0.4;
+    RX(parts.spine, spx, 9, 0.65);
+    RZ(parts.spine, -steer * 0.3 + swayA, 9, 0.65);
+    RX(parts.chest, 0.1 + brake * -0.15 + tuck * 0.2 + longG * -0.2, 8.5, 0.6);
+    RX(parts.neck, -(spx + 0.1) * 0.7 + longG * 0.25, 7, 0.5);
+    RZ(parts.neck, steer * 0.22 + swayA * 0.8, 7, 0.5);
     for (const leg of parts.legs) {
       RX(leg.hip, -1.5 + breathe * 0.02);
       RX(leg.knee, 0.95);
@@ -427,10 +460,10 @@ export function setPose(rider, p = {}) {
       RY(leg.ankle, 0);
     }
     for (const arm of parts.arms) {
-      RX(arm.shoulder, -0.85 + brake * 0.55 + air * -0.5 + wobA + knocked * 0.8);
-      RZ(arm.shoulder, arm.side * (-0.18 + knocked * 0.9));
-      RX(arm.elbow, -0.5 - brake * 0.5);
-      RX(arm.wrist, -0.3);
+      RX(arm.shoulder, -0.85 + brake * 0.55 + air * -0.5 + wobA + longG * -0.45 + swayA * arm.side + knocked * 0.8, 8, 0.5);
+      RZ(arm.shoulder, arm.side * (-0.18 + jolt * 0.5 + knocked * 0.9), 8, 0.5);
+      RX(arm.elbow, -0.5 - brake * 0.5, 9, 0.55);
+      RX(arm.wrist, -0.3, 7, 0.45);
     }
     return;
   }
@@ -457,9 +490,9 @@ export function setPose(rider, p = {}) {
   // 0.05 hip offset inside the pelvis)
   PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.07 : 0) - air * 0.12 - knocked * 0.35);
   // center of gravity slides fore/aft over the deck with the weight shift
-  parts.pelvis.position.z += (-shift * 0.11 - parts.pelvis.position.z) * dmp;
+  PZ(parts.pelvis, -shift * 0.11);
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
-  RY(parts.pelvis, pelvisYaw);
+  RY(parts.pelvis, pelvisYaw, 11, 0.75);
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
@@ -467,23 +500,24 @@ export function setPose(rider, p = {}) {
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
-  RX(parts.spine, spineBase * 0.45 + wobS * 0.5);
-  RZ(parts.spine, -steer * 0.12 + wobS * 0.3);
-  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18);
-  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5);
-  RZ(parts.chest, -steer * 0.12);
-  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14);
-  RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75);
-  RZ(parts.neck, steer * 0.38);
-  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2);
+  RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 + swayB * 0.4, 9, 0.65);
+  RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
+  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18, 9, 0.65);
+  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22, 8.5, 0.6);
+  RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
+  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14, 8.5, 0.6);
+  // the head is the loosest mass: it counter-balances late and wobbles
+  RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 + longG * 0.3, 6.5, 0.48);
+  RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
+  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2, 6.5, 0.48);
 
   for (const [i, leg] of parts.legs.entries()) {
     const { a, b } = legAngles[i];
-    RX(leg.hip, -a);
-    RX(leg.knee, b);
-    RX(leg.ankle, a - b); // levels the boot on the deck
+    RX(leg.hip, -a, 14, 0.9);
+    RX(leg.knee, b, 14, 0.9);
+    RX(leg.ankle, a - b, 16, 0.95); // levels the boot on the deck
     // boots stay bound to the deck line whatever the hips do
-    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y);
+    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y, 16, 0.95);
   }
 
   // arm stance targets blend by state weight instead of hard branches
@@ -512,12 +546,14 @@ export function setPose(rider, p = {}) {
       ex = ex * (1 - air) + -0.5 * air;
       wx = wx * (1 - air) + -0.2 * air;
     }
-    RX(arm.shoulder, sx);
-    RZ(arm.shoulder, sz);
-    RX(arm.elbow, ex);
-    RX(arm.wrist, wx);
+    // arms are loose masses: they trail the body and swing through stops
+    RX(arm.shoulder, sx + longG * -0.5 + swayA * arm.side * 0.7, 8, 0.5);
+    RZ(arm.shoulder, sz + jolt * arm.side * 0.4 + swayB * arm.side * 0.5, 8, 0.5);
+    RX(arm.elbow, ex, 9, 0.55);
+    RX(arm.wrist, wx + swayB * 0.4, 7, 0.45);
   }
   for (const pole of parts.poles) {
-    RX(pole, -1.15 - tuck * 0.35);
+    // poles swing on loose wrists — they whip and settle, never snap
+    RX(pole, -1.15 - tuck * 0.35 + longG * 0.3, 6, 0.45);
   }
 }
