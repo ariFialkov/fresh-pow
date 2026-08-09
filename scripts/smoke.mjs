@@ -35,8 +35,9 @@ await page.click('#start-btn');
 await page.waitForSelector('#race-ui', { timeout: 5000 });
 console.log('race scene mounted');
 
-// hold through countdown then "drive": tuck + carve via keyboard
-await page.waitForTimeout(4500);
+// countdown runs on game time, which crawls under software rendering
+await page.waitForFunction(() => window.__fp?.race?.stateName === 'racing', undefined, { timeout: 180000 });
+console.log('gates open');
 await page.keyboard.down('w');
 await page.waitForTimeout(4000);
 await page.keyboard.up('w');

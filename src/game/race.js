@@ -68,6 +68,7 @@ export class RaceScene {
 
     this.time = 0;
     this.playerStallTime = 0;
+    this.playerKnocks = 0; // times the player has been flattened (capped)
     this.stateName = 'countdown';
     this.countdownT = 3.9; // small lead-in before "3"
     this._lastCount = null;
@@ -117,6 +118,7 @@ export class RaceScene {
         b.update(dt, this);
         b.trail.push(b.obj.position.x, b.obj.position.z, b.y <= this.terrain.heightAt(b.obj.position.x, b.obj.position.z) + 0.25);
       }
+      this._resolveRiderCollisions(dt);
       this._enforceDrawnOrder(dt);
 
       // player crosses the line
@@ -148,6 +150,48 @@ export class RaceScene {
 
     this._updateCamera(dt, false);
     this.snow.update(dt, this.camera.position);
+  }
+
+  /**
+   * Rider-vs-rider contact: whoever is slower gets flattened; near-equal
+   * speeds shove both riders apart with a wobble. Bots use this deliberately
+   * (see Bot.aggro) to bump back past the player — pacing guarantees are
+   * unaffected because the controllers work around whatever speed the player
+   * has left.
+   */
+  _resolveRiderCollisions(dt) {
+    const p = this.player;
+    if (p.finished) return;
+    for (const b of this.bots) {
+      b._collideCd = Math.max(0, (b._collideCd || 0) - dt);
+      if (b.finished || b.frozen || b._collideCd > 0) continue;
+      const dx = b.obj.position.x - p.pos.x;
+      const dz = b.obj.position.z - p.pos.z;
+      const dy = Math.abs(b.obj.position.y - p.pos.y);
+      // radius is generous to cover per-frame tunneling at high closing speed
+      if (dx * dx + dz * dz > 1.6 * 1.6 || dy > 1.6) continue;
+
+      b._collideCd = 3;
+      b.aggroCooldown = 16 + Math.random() * 12;
+      const side = Math.sign(dx) || 1;
+      b._pushX += side * 1.5;
+
+      if (b.speed > p.speed + 1.5) {
+        // bot rolls through the player
+        this.playerKnocks++;
+        p.knockDown(b.identity.name);
+      } else if (p.speed > b.speed + 1.5) {
+        b.knockDown();
+        this.hud.trickToast('BOOM!', `you took out ${b.identity.name}`);
+        this.fx.burst(b.obj.position, { x: 0, z: -1 }, { count: 26, speed: 5, up: 4, spread: 2.4, size: 1.4 });
+        p.speed *= 0.9; // shoulder check isn't free
+      } else {
+        // trading paint at matched speed — both wobble apart
+        p.stumbleT = Math.max(p.stumbleT, 0.7);
+        b.stumbleT = Math.max(b.stumbleT, 0.7);
+        p.pos.x -= side * 0.8;
+      }
+    }
   }
 
   /**

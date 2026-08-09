@@ -35,6 +35,8 @@ export class Player {
     this.landComp = 0; // knee compression after landings
     this.fx = null; // SprayPool, wired up by the race scene
     this.t = 0;
+    this.knockT = 0; // knocked-flat timer after rider collisions
+    this._wasBraking = false;
 
     // tricks
     this.trickSpin = 0; // target extra yaw revolutions (signed, radians)
@@ -79,8 +81,10 @@ export class Player {
       return;
     }
 
-    const stumbling = this.stumbleT > 0;
-    if (stumbling) this.stumbleT -= dt;
+    if (this.knockT > 0) this.knockT -= dt;
+    const knocked = Math.max(0, Math.min(1, Math.min(this.knockT * 3, (1.7 - this.knockT) * 4)));
+    const stumbling = this.stumbleT > 0 || this.knockT > 0;
+    if (this.stumbleT > 0) this.stumbleT -= dt;
     this.landComp = Math.max(0, this.landComp - dt * 2.6);
 
     // ---- steering ----
@@ -105,6 +109,16 @@ export class Player {
       a -= k * this.speed * this.speed;
       if (braking) a -= BRAKE_DECEL;
       if (stumbling) a -= 6;
+      if (this.knockT > 0) a -= 10; // sliding on your side scrubs hard
+
+      // fresh brake press throws a plume off the now-sideways edge
+      if (braking && !this._wasBraking && this.fx && this.speed > 8) {
+        const side = Math.sign(inp.steer) || 1;
+        this.fx.burst(this.pos, { x: side * -dir.z, z: side * dir.x }, {
+          count: 18, speed: 5, up: 3, spread: 1.1, size: 1.2,
+        });
+      }
+      this._wasBraking = braking;
       // carving scrubs a little speed
       a -= Math.abs(this.yaw) * 0.9;
 
@@ -211,12 +225,26 @@ export class Player {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
       steer: this.yaw / MAX_YAW,
-      stumble: stumbling ? 1 : 0,
+      stumble: this.stumbleT > 0 ? 1 : 0,
+      knocked,
       airborne: this.airborne,
       crouch: this.landComp,
       speedNorm: clamp(this.speed / 42, 0, 1),
       t: this.t,
+      dt,
     });
+  }
+
+  /** Flattened by another rider. Harsher than a stumble — you go down. */
+  knockDown(byName) {
+    if (this.knockT > 0) return;
+    this.knockT = 1.7;
+    this.speed *= 0.25;
+    if (this.hud) this.hud.stumbleFlash(`taken out by ${byName}!`);
+    if (this.fx) {
+      const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.fx.burst(this.pos, dir, { count: 34, speed: 6, up: 4.5, spread: 2.6, size: 1.5 });
+    }
   }
 
   _collide() {

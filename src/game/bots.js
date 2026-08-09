@@ -39,6 +39,11 @@ export class Bot {
     this.personality = noise1(this.seed * 0.13, 991) * 18;
     this.weavePhase = this.seed * 2.39;
     this._t = 0;
+    this.knockT = 0; // flattened by a collision
+    this.aggro = 0; // seconds left in a deliberate take-out attempt
+    this.aggroCooldown = 8;
+    this._aggroBlend = 0;
+    this._pushX = 0; // lateral shove from collisions, decays
 
     this.placeAt(this.lane.x, this.lane.z);
   }
@@ -61,10 +66,19 @@ export class Bot {
     return x;
   }
 
+  /** Flattened by a collision — brief faceplant, then back up. */
+  knockDown() {
+    if (this.knockT > 0) return;
+    this.knockT = 1.6;
+    this.aggro = 0;
+  }
+
   update(dt, race) {
     if (this.frozen) return;
     this._t += dt;
     if (this.stumbleT > 0) this.stumbleT -= dt;
+    if (this.knockT > 0) this.knockT -= dt;
+    const knocked = Math.max(0, Math.min(1, Math.min(this.knockT * 3, (1.6 - this.knockT) * 4)));
 
     const L = COURSE.length;
     const playerD = race.player.progress;
@@ -107,7 +121,22 @@ export class Bot {
 
       // player parked mid-race? riders destined ahead eventually just send it
       if (this.ahead && race.playerStallTime > 5) this.autopilot = true;
+
+      // deliberate take-outs: a rider destined ahead who finds themself stuck
+      // behind the player lines up a bump to get back through
+      this.aggroCooldown -= dt;
+      const gapBehind = playerD - this.d;
+      if (
+        this.aggro <= 0 && this.aggroCooldown <= 0 && this.ahead &&
+        gapBehind > 3 && gapBehind < 24 && race.playerKnocks < 2 &&
+        race.player.knockT <= 0 && noise1(this._t * 0.23 + this.seed * 5.3, 727) > 0.45
+      ) {
+        this.aggro = 6;
+      }
     }
+
+    if (this.aggro > 0) this.aggro -= dt;
+    if (this.knockT > 0) v = Math.min(v, 3); // down riders slide, not race
 
     this.speed = lerp(this.speed, v, clamp(dt * 2.5, 0, 1));
     this.d += this.speed * dt;
@@ -124,7 +153,12 @@ export class Bot {
     }
 
     // ---- place on the mountain ----
-    const x = this.lineAt(this.d);
+    // aggro pulls the line onto the player's; collision shoves decay away
+    const wantAggro = this.aggro > 0 && !this.finished ? 1 : 0;
+    this._aggroBlend += (wantAggro - this._aggroBlend) * clamp(dt * 1.6, 0, 1);
+    this._pushX *= Math.max(0, 1 - dt * 2.2);
+    let x = this.lineAt(this.d) + this._pushX;
+    if (this._aggroBlend > 0.01) x = lerp(x, race.player.pos.x, this._aggroBlend * 0.9);
     const z = -this.d;
     const ground = this.terrain.heightAt(x, z);
     if (ground <= this.y) {
@@ -157,11 +191,13 @@ export class Bot {
     const carve = Math.cos(this.d * 0.045 + this.weavePhase);
     setPose(this.rider, {
       steer: clamp(carve, -1, 1) * 0.7,
-      tuck: this.speed > 34 ? 1 : 0,
+      tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
       stumble: this.stumbleT > 0 ? 1 : 0,
+      knocked,
       airborne,
       speedNorm: clamp(this.speed / 42, 0, 1),
       t: this._t + this.weavePhase,
+      dt,
     });
 
     // powder off the carves (cheaper budget than the player's spray)

@@ -73,6 +73,9 @@ export class MenuScene {
     });
 
     this.t = 0;
+
+    // debug/test hook (also handy in devtools)
+    window.__fp = { menu: this, setPose };
   }
 
   _placePlayer(gear) {
