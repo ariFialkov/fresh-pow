@@ -102,7 +102,7 @@ function buildGear(gear) {
     stripe.position.y = 0.048;
     g.add(base, deck, stripe);
     // bindings sit where the pose actually plants the boots
-    for (const [z, rot] of [[-0.24, -0.5], [0.24, -0.5]]) {
+    for (const [z, rot] of [[-0.24, -0.3], [0.24, -0.3]]) {
       const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.13, 0.05, 0.3)), darkMat);
       b.position.set(0, 0.065, z);
       b.rotation.y = rot;
@@ -336,6 +336,9 @@ export function createRider(gear, helmetColor) {
     root, rig, gearGroup, parts, shadow,
     isSled, isBoard, type: gear.type,
     baseBodyYaw: isBoard ? 0.6 : 0,
+    // visual-only: the deck yaws to run under the angled stance line, so the
+    // boots sit on the board instead of hanging off its edges
+    gearYawBase: isBoard ? 0.29 : 0,
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
@@ -399,7 +402,7 @@ export function setPose(rider, p = {}) {
 
   if (!isSled) {
     // skis/board pivot across the slope to scrub speed
-    RY(rider.gearGroup, bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12);
+    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12);
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
   }
