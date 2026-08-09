@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { preview } from 'vite';
 
-const server = await preview({ preview: { port: 4174, strictPort: true }, root: '/home/user/fresh-pow' });
+const server = await preview({ preview: { port: 4174, strictPort: true } });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 const errors = [];

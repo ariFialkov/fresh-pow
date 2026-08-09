@@ -43,28 +43,27 @@ await page.keyboard.up('w');
 
 const res = await page.evaluate(() => {
   const r = window.__fp.race;
+  const rankByName = Object.fromEntries(r.bots.map((b) => [b.identity.name, b.rank]));
   return {
     bigPos: document.querySelector('.big-pos')?.textContent,
     standings: [...document.querySelectorAll('.standings li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()),
     balance: JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance,
-    liveOrder: [
-      { name: 'You', d: r.player.progress },
-      ...r.bots.map((b) => ({ name: b.identity.name, d: b.d, rank: b.rank, finished: b.finished })),
-    ].sort((a, b) => b.d - a.d),
+    // line-crossing order in crossing time — the ground truth for the result
+    finishOrder: r.finishOrder.map((f) => ({ name: f.name, me: !!f.me, rank: f.me ? null : rankByName[f.name] })),
   };
 });
 console.log('results big pos:', res.bigPos);
 console.log('standings:', res.standings.join(' | '));
-console.log('live order at finish:', JSON.stringify(res.liveOrder));
+console.log('crossing order:', JSON.stringify(res.finishOrder));
 console.log(`balance: ${balanceBefore} -> ${res.balance} (bet ${outcome.bet}, payout ${outcome.payout})`);
 
 // 1. shown position matches the draw
 if (!res.bigPos.startsWith(String(outcome.playerPos))) fail(`shown ${res.bigPos} != drawn ${outcome.playerPos}`);
-// 2. actual on-snow order matches the draw: count riders physically ahead of the player
-const crossedAhead = res.liveOrder.findIndex((r) => r.name === 'You');
-if (crossedAhead + 1 !== outcome.playerPos) fail(`on-snow position ${crossedAhead + 1} != drawn ${outcome.playerPos}`);
+// 2. the player physically crossed the line in the drawn position
+const crossedAhead = res.finishOrder.findIndex((r) => r.me);
+if (crossedAhead + 1 !== outcome.playerPos) fail(`crossing position ${crossedAhead + 1} != drawn ${outcome.playerPos}`);
 // 2b. bots that crossed ahead did so in their drawn order
-const aheadRanks = res.liveOrder.slice(0, crossedAhead).map((r) => r.rank);
+const aheadRanks = res.finishOrder.slice(0, crossedAhead).map((r) => r.rank);
 if (JSON.stringify(aheadRanks) !== JSON.stringify([...aheadRanks].sort((a, b) => a - b))) {
   fail(`ahead bots crossed out of drawn order: ${aheadRanks.join(',')}`);
 }
