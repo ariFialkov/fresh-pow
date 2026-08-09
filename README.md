@@ -6,6 +6,17 @@ four are bots that join the lobby like real players and race around you.
 
 > **Virtual chips only.** There is no real money anywhere in this game.
 
+## Play it
+
+**https://arifialkov.github.io/fresh-pow/**
+
+Deploys are automatic: every push to the default branch runs
+[`deploy.yml`](.github/workflows/deploy.yml), which builds the app and force-pushes `dist/`
+to the `gh-pages` branch. One-time setup if the link 404s: repo **Settings → Pages →
+Source: "Deploy from a branch" → Branch: `gh-pages` / `(root)` → Save**.
+
+On your phone, open the link and "Add to Home Screen" to install it as a PWA.
+
 ## How it works
 
 ### The betting core (deterministic outcome)
