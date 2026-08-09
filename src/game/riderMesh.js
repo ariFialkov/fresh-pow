@@ -161,6 +161,10 @@ export function createRider(gear, helmetColor) {
   const poleMat = mat(0x3a404c);
 
   const gearGroup = buildGear(gear);
+  // boards ride a touch higher so the deck never vanishes into the snow
+  // surface between heightfield samples (the rider sink + terrain curvature
+  // was swallowing it)
+  if (isBoard) gearGroup.position.y = 0.07;
   rig.add(gearGroup);
 
   const parts = { legs: [], arms: [], poles: [] };
@@ -451,7 +455,7 @@ export function setPose(rider, p = {}) {
   }
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
-  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 - air * 0.12 - knocked * 0.35);
+  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.07 : 0) - air * 0.12 - knocked * 0.35);
   // center of gravity slides fore/aft over the deck with the weight shift
   parts.pelvis.position.z += (-shift * 0.11 - parts.pelvis.position.z) * dmp;
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
