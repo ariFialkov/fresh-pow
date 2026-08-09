@@ -6,7 +6,7 @@ import { Terrain, COURSE } from './terrain.js';
 import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
-import { makeSky, addLights, Snowfall } from './world.js';
+import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { SprayPool, Trail } from './snowfx.js';
 import { mulberry32, smoothstep } from './rng.js';
 import { drawOutcome, multiplierFor } from './rtp.js';
@@ -30,7 +30,7 @@ export class RaceScene {
     this.terrain.build(tg);
     this.scene.add(tg);
     this.scene.add(makeSky());
-    addLights(this.scene);
+    this.sun = addLights(this.scene).sun;
     this.snow = new Snowfall(this.scene);
 
     // ---- the draw: outcome decided here, before anyone moves ----
@@ -158,6 +158,7 @@ export class RaceScene {
     for (const b of this.bots) b.trail.update(dt);
 
     this._updateCamera(dt, false);
+    aimSun(this.sun, this.player.pos); // keep the shadow frustum on the action
     this.snow.update(dt, this.camera.position);
   }
 

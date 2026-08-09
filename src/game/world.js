@@ -29,13 +29,37 @@ export function makeSky() {
   return dome;
 }
 
+// Global render quality knobs (main.js turns shadows off on weak devices)
+export const Quality = { shadows: true };
+
 export function addLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x9aa4b5, 1.15);
+  // dimmer ambient + stronger warm sun = deeper shading on riders and moguls
+  const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x8e99ab, 0.85);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
-  sun.position.set(120, 220, 60);
+  const sun = new THREE.DirectionalLight(0xfff0d0, 1.9);
+  sun.position.set(75, 85, 35);
   scene.add(sun);
+  scene.add(sun.target);
+  if (Quality.shadows) {
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    const c = sun.shadow.camera;
+    c.left = -26;
+    c.right = 26;
+    c.top = 26;
+    c.bottom = -26;
+    c.near = 1;
+    c.far = 320;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.5;
+  }
   return { hemi, sun };
+}
+
+/** Keeps the tight shadow frustum centered on the action. */
+export function aimSun(sun, focus) {
+  sun.position.set(focus.x + 75, focus.y + 85, focus.z + 35);
+  sun.target.position.copy(focus);
 }
 
 export class Snowfall {

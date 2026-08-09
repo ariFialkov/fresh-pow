@@ -37,6 +37,7 @@ export class Player {
     this.t = 0;
     this.knockT = 0; // knocked-flat timer after rider collisions
     this._wasBraking = false;
+    this.bump = 0; // terrain roughness -> continuous leg suspension
 
     // tricks
     this.trickSpin = 0; // target extra yaw revolutions (signed, radians)
@@ -246,14 +247,19 @@ export class Player {
 
     this._sync(dt);
 
+    // legs work the terrain like suspension: rough snow = constant absorption
+    const bumpTarget = this.airborne ? 0 : clamp(Math.abs(this.groundVy) * 0.045, 0, 0.4);
+    this.bump = lerp(this.bump, bumpTarget, clamp(dt * 5, 0, 1));
+
     setPose(this.rider, {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
-      steer: this.yaw / MAX_YAW,
+      // lean scales with speed — slow riders stand tall, fast riders bank
+      steer: (this.yaw / MAX_YAW) * clamp(this.speed / 26, 0.15, 1),
       stumble: this.stumbleT > 0 ? 1 : 0,
       knocked,
       airborne: this.airborne,
-      crouch: this.landComp,
+      crouch: clamp(this.landComp + this.bump, 0, 1),
       speedNorm: clamp(this.speed / 42, 0, 1),
       t: this.t,
       dt,

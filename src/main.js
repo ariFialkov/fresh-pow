@@ -5,11 +5,14 @@ import { MenuScene, rosterFor } from './game/menu.js';
 import { RaceScene } from './game/race.js';
 import { randomSeed } from './game/rng.js';
 import { needsTopUp, topUp, state } from './game/state.js';
+import { Quality } from './game/world.js';
 
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
 const input = new Input(renderer.domElement);
@@ -73,7 +76,11 @@ renderer.setAnimationLoop(() => {
   fpsTimer += rawDt;
   if (fpsTimer > 3 && fpsN > 10) {
     const fps = fpsN / fpsAcc;
-    if (fps < 42 && dprScale > 0.55) dprScale = Math.max(0.55, dprScale - 0.15);
+    if (fps < 42 && Quality.shadows) {
+      // shadows are the first thing to go on a struggling device
+      Quality.shadows = false;
+      if (current?.sun) current.sun.castShadow = false;
+    } else if (fps < 42 && dprScale > 0.55) dprScale = Math.max(0.55, dprScale - 0.15);
     else if (fps > 56 && dprScale < 1) dprScale = Math.min(1, dprScale + 0.1);
     const target = MAX_DPR * dprScale;
     if (Math.abs(renderer.getPixelRatio() - target) > 0.01) {

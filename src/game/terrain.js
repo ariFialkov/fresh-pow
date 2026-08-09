@@ -369,6 +369,7 @@ export class Terrain {
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, snowMat);
       mesh.frustumCulled = true;
+      mesh.receiveShadow = true;
       group.add(mesh);
     }
   }
@@ -400,6 +401,7 @@ export class Terrain {
       trunks.setMatrixAt(i, m);
       foliage.setMatrixAt(i, m);
     });
+    trunks.castShadow = foliage.castShadow = true;
     group.add(trunks, foliage);
 
     const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
@@ -413,6 +415,7 @@ export class Terrain {
       m.compose(new THREE.Vector3(r.x, y, r.z), q, sc);
       rocks.setMatrixAt(i, m);
     });
+    rocks.castShadow = true;
     group.add(rocks);
 
     // course flags every ~90 m marking the line

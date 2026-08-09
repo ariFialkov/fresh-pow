@@ -41,11 +41,11 @@ function cached(key, make) {
   return g;
 }
 
-function capsule(key, r, len, cs = 4, rs = 10) {
+function capsule(key, r, len, cs = 4, rs = 12) {
   return cached(`cap:${key}`, () => new THREE.CapsuleGeometry(r, len, cs, rs));
 }
 
-function lathe(key, pts, segs = 12) {
+function lathe(key, pts, segs = 16) {
   return cached(`lathe:${key}`, () => {
     const g = new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), segs);
     g.computeVertexNormals();
@@ -53,7 +53,7 @@ function lathe(key, pts, segs = 12) {
   });
 }
 
-function sphere(key, r, w = 10, h = 8) {
+function sphere(key, r, w = 12, h = 10) {
   return cached(`sph:${key}`, () => new THREE.SphereGeometry(r, w, h));
 }
 
@@ -67,21 +67,31 @@ function buildGear(gear) {
   const accentMat = mat(gear.accent);
   const darkMat = mat(0x2c3038);
 
+  const baseMat = mat(0x14171d); // near-black base so decks pop off the snow
+
   if (gear.type === 'ski') {
     for (const side of [-0.1, 0.1]) {
+      const base = mesh(capsule('skibase', 0.062, 1.52), baseMat);
+      base.rotation.x = Math.PI / 2;
+      base.scale.set(1, 1, 0.16);
+      base.position.set(side, 0.008, 0.05);
       const ski = mesh(capsule('ski', 0.055, 1.5), deckMat);
       ski.rotation.x = Math.PI / 2;
       ski.scale.set(1, 1, 0.22);
-      ski.position.set(side, 0.02, 0.05);
+      ski.position.set(side, 0.022, 0.05);
       const tip = mesh(capsule('skitip', 0.05, 0.16), accentMat);
       tip.rotation.x = Math.PI / 2 - 0.55;
       tip.scale.set(0.95, 1, 0.3);
       tip.position.set(side, 0.07, -0.82);
       const binding = mesh(cached('bind', () => new THREE.BoxGeometry(0.1, 0.07, 0.3)), darkMat);
       binding.position.set(side, 0.05, 0.05);
-      g.add(ski, tip, binding);
+      g.add(base, ski, tip, binding);
     }
   } else if (gear.type === 'board') {
+    const base = mesh(capsule('boardbase', 0.168, 1.17), baseMat);
+    base.rotation.x = Math.PI / 2;
+    base.scale.set(1, 1, 0.1);
+    base.position.y = 0.02;
     const deck = mesh(capsule('board', 0.155, 1.15), deckMat);
     deck.rotation.x = Math.PI / 2;
     deck.scale.set(1, 1, 0.14);
@@ -90,7 +100,7 @@ function buildGear(gear) {
     stripe.rotation.x = Math.PI / 2;
     stripe.scale.set(1, 1, 0.12);
     stripe.position.y = 0.048;
-    g.add(deck, stripe);
+    g.add(base, deck, stripe);
     // bindings sit where the pose actually plants the boots
     for (const [z, rot] of [[-0.24, -0.5], [0.24, -0.5]]) {
       const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.13, 0.05, 0.3)), darkMat);
@@ -173,7 +183,7 @@ export function createRider(gear, helmetColor) {
   const lowerTorso = mesh(lathe('ltorso', [
     [0.146, -0.02], [0.15, 0.04], [0.134, 0.12], [0.127, 0.19],
   ], 14), suitMat);
-  lowerTorso.scale.set(1, 1, 0.8);
+  lowerTorso.scale.set(1, 1, 0.72);
   spineG.add(lowerTorso);
 
   const chestG = new THREE.Group();
@@ -183,13 +193,22 @@ export function createRider(gear, helmetColor) {
   const upperTorso = mesh(lathe('utorso', [
     [0.128, -0.02], [0.152, 0.08], [0.17, 0.18], [0.162, 0.26], [0.088, 0.33],
   ], 14), suitMat);
-  upperTorso.scale.set(1, 1, 0.8);
+  upperTorso.scale.set(1, 1, 0.72);
   chestG.add(upperTorso);
   const collar = mesh(capsule('collar', 0.082, 0.12), suitMat);
   collar.rotation.z = Math.PI / 2;
   collar.position.y = 0.3;
   collar.scale.set(0.9, 1, 0.9);
   chestG.add(collar);
+
+  // backcountry pack — riders here always carry one
+  const pack = mesh(capsule('pack', 0.115, 0.14), mat(darken(gear.accent, 0.75)));
+  pack.scale.set(0.95, 1, 0.55);
+  pack.position.set(0, 0.12, 0.16);
+  const packLid = mesh(capsule('packlid', 0.09, 0.05), mat(darken(gear.accent, 0.5)));
+  packLid.scale.set(0.9, 1, 0.5);
+  packLid.position.set(0, 0.24, 0.15);
+  chestG.add(pack, packLid);
 
   // ---- neck + head ----
   const neckG = new THREE.Group();
@@ -203,9 +222,9 @@ export function createRider(gear, helmetColor) {
   headG.position.y = 0.13;
   neckG.add(headG);
   parts.head = headG;
-  const face = mesh(sphere('head', 0.1, 12, 10), skinMat);
+  const face = mesh(sphere('head', 0.094, 14, 12), skinMat);
   face.scale.set(0.92, 1.05, 0.98);
-  const helmet = mesh(cached('helmet', () => new THREE.SphereGeometry(0.112, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6)), helmetMat);
+  const helmet = mesh(cached('helmet', () => new THREE.SphereGeometry(0.106, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6)), helmetMat);
   helmet.position.y = 0.015;
   const brim = mesh(cached('brim', () => new THREE.TorusGeometry(0.1, 0.018, 6, 12, Math.PI * 1.1)), helmetMat);
   brim.rotation.x = Math.PI / 2;
@@ -300,13 +319,18 @@ export function createRider(gear, helmetColor) {
     parts.legs.push({ hip: hipG, knee: kneeG, ankle: ankleG, index: i });
   }
 
-  // blob shadow
+  // soft contact blob (real shadows carry most of the grounding now)
   const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.85, 16),
-    new THREE.MeshBasicMaterial({ color: 0x0b1c2c, transparent: true, opacity: 0.26, depthWrite: false })
+    new THREE.CircleGeometry(0.8, 16),
+    new THREE.MeshBasicMaterial({ color: 0x0b1c2c, transparent: true, opacity: 0.13, depthWrite: false })
   );
   shadow.rotation.x = -Math.PI / 2;
   root.add(shadow);
+
+  // riders cast real shadows onto the snow (the blob is just soft contact)
+  rig.traverse((o) => {
+    if (o.isMesh) o.castShadow = true;
+  });
 
   const rider = {
     root, rig, gearGroup, parts, shadow,
@@ -315,8 +339,9 @@ export function createRider(gear, helmetColor) {
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
+    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0 },
   };
-  setPose(rider, { idle: true, t: 0 });
+  setPose(rider, { idle: true, t: 0, dt: 1 }); // dt=1 converges the damping instantly
   return rider;
 }
 
@@ -332,15 +357,29 @@ export function setPose(rider, p = {}) {
   const { parts, isSled, isBoard } = rider;
   const t = p.t ?? 0;
   const dt = p.dt ?? 1 / 60;
-  const tuck = p.tuck ?? 0;
-  const brake = p.brake ?? 0;
-  const steer = p.steer ?? 0;
-  const stumble = p.stumble ?? 0;
-  const knocked = p.knocked ?? 0;
+
+  // ---- input smoothing: gameplay params ease instead of stepping ----
+  const S = rider._s;
+  const ease = (cur, target, rate) => cur + (target - cur) * (1 - Math.exp(-dt * rate));
+  S.tuck = ease(S.tuck, p.tuck ?? 0, 5);
+  S.brakeIn = ease(S.brakeIn, p.brake ?? 0, 7);
+  S.steer = ease(S.steer, p.steer ?? 0, 6);
+  S.stumble = ease(S.stumble, p.stumble ?? 0, 6);
+  S.knocked = ease(S.knocked, p.knocked ?? 0, 9);
+  S.crouch = ease(S.crouch, p.crouch ?? 0, 10);
+  S.air = ease(S.air, p.airborne ? 1 : 0, 6);
+  const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
+  const brake = S.brakeIn;
   const airborne = !!p.airborne;
   const idle = !!p.idle;
-  const crouch = p.crouch ?? 0;
   const speed = p.speedNorm ?? 0;
+
+  // ---- output damping: every joint glides to its target ----
+  const dmp = 1 - Math.exp(-dt * 12);
+  const RX = (g, v) => (g.rotation.x += (v - g.rotation.x) * dmp);
+  const RY = (g, v) => (g.rotation.y += (v - g.rotation.y) * dmp);
+  const RZ = (g, v) => (g.rotation.z += (v - g.rotation.z) * dmp);
+  const PY = (g, v) => (g.position.y += (v - g.position.y) * dmp);
 
   const wobS = stumble * Math.sin(t * 11) * 0.32;
   const wobA = stumble * Math.sin(t * 9 + 1.3) * 0.45;
@@ -348,51 +387,51 @@ export function setPose(rider, p = {}) {
   const pump = !idle && !airborne ? Math.sin(t * 4.5) * 0.04 * speed : 0;
 
   // hockey-stop: gear and body swing perpendicular together, smoothly
-  if (brake > 0 && !rider._wasBraking) rider._brakeSide = steer < -0.05 ? -1 : 1;
-  rider._wasBraking = brake > 0;
+  if ((p.brake ?? 0) > 0 && !rider._wasBraking) rider._brakeSide = steer < -0.05 ? -1 : 1;
+  rider._wasBraking = (p.brake ?? 0) > 0;
   const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 6);
   const bkYaw = rider._brakeSide * bk;
 
   // whole-body edge angle into the turn; knocked riders lie on their side
-  rider.rig.rotation.z =
-    -steer * (isSled ? 0.28 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + knocked * rider._brakeSide * 1.35;
+  RZ(rider.rig, -steer * (isSled ? 0.28 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + knocked * rider._brakeSide * 1.35);
 
   if (!isSled) {
     // skis/board pivot across the slope to scrub speed
-    rider.gearGroup.rotation.y = bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12;
+    RY(rider.gearGroup, bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12);
   } else {
-    rider.gearGroup.rotation.y = bkYaw * 0.25;
+    RY(rider.gearGroup, bkYaw * 0.25);
   }
 
   if (isSled) {
-    parts.pelvis.position.y = 0.34 - knocked * 0.1;
-    parts.pelvis.rotation.y = bkYaw * 0.25;
-    parts.spine.rotation.x = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + knocked * 0.4;
-    parts.spine.rotation.z = -steer * 0.3;
-    parts.chest.rotation.x = 0.1 + brake * -0.15 + tuck * 0.2;
-    parts.neck.rotation.x = -(parts.spine.rotation.x + parts.chest.rotation.x) * 0.7;
-    parts.neck.rotation.z = steer * 0.22;
+    PY(parts.pelvis, 0.34 - knocked * 0.1);
+    RY(parts.pelvis, bkYaw * 0.25);
+    const spx = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + knocked * 0.4;
+    RX(parts.spine, spx);
+    RZ(parts.spine, -steer * 0.3);
+    RX(parts.chest, 0.1 + brake * -0.15 + tuck * 0.2);
+    RX(parts.neck, -(spx + 0.1) * 0.7);
+    RZ(parts.neck, steer * 0.22);
     for (const leg of parts.legs) {
-      leg.hip.rotation.x = -1.5 + breathe * 0.02;
-      leg.knee.rotation.x = 0.95;
-      leg.ankle.rotation.x = 0.6;
-      leg.ankle.rotation.y = 0;
+      RX(leg.hip, -1.5 + breathe * 0.02);
+      RX(leg.knee, 0.95);
+      RX(leg.ankle, 0.6);
+      RY(leg.ankle, 0);
     }
     for (const arm of parts.arms) {
-      arm.shoulder.rotation.x = -0.85 + brake * 0.55 + (airborne ? -0.5 : 0) + wobA + knocked * 0.8;
-      arm.shoulder.rotation.z = arm.side * (-0.18 + knocked * 0.9);
-      arm.elbow.rotation.x = -0.5 - brake * 0.5;
-      arm.wrist.rotation.x = -0.3;
+      RX(arm.shoulder, -0.85 + brake * 0.55 + air * -0.5 + wobA + knocked * 0.8);
+      RZ(arm.shoulder, arm.side * (-0.18 + knocked * 0.9));
+      RX(arm.elbow, -0.5 - brake * 0.5);
+      RX(arm.wrist, -0.3);
     }
     return;
   }
 
   // ---- standing riders (ski / board) ----
-  const kneeBend = idle
+  // ground and air stances blend continuously through S.air
+  const kneeGround = idle
     ? 0.18 + breathe * 0.03
-    : airborne
-      ? 1.05 + crouch * 0.2
-      : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
+    : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
+  const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2) * air;
 
   // per-leg chain angles; board legs split fore/aft to reach the bindings
   let legVSum = 0;
@@ -407,65 +446,67 @@ export function setPose(rider, p = {}) {
   }
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
-  parts.pelvis.position.y = legVSum / 2 + 0.16 + 0.05 - (airborne ? 0.12 : 0) - knocked * 0.35;
-  parts.pelvis.rotation.y = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
+  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 - air * 0.12 - knocked * 0.35);
+  const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
+  RY(parts.pelvis, pelvisYaw);
 
-  const spineBase = idle
+  const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : airborne
-      ? -0.08 + tuck * 0.2
-      : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5;
-  // the fold spreads over two spine joints for a rounded back
-  parts.spine.rotation.x = spineBase * 0.45 + wobS * 0.5;
-  parts.spine.rotation.z = -steer * 0.12 + wobS * 0.3;
-  parts.spine.rotation.y = -parts.pelvis.rotation.y * 0.25;
-  parts.chest.rotation.x = spineBase * 0.55 + tuck * 0.35 + wobS * 0.5;
-  parts.chest.rotation.z = -steer * 0.12;
-  parts.chest.rotation.y = -parts.pelvis.rotation.y * 0.3;
-  parts.neck.rotation.x = -(spineBase + tuck * 0.35) * 0.75;
-  parts.neck.rotation.z = steer * 0.26 + steer * 0.12;
-  parts.neck.rotation.y = -parts.pelvis.rotation.y * 0.45;
+    : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5;
+  const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2) * air;
+  // the fold spreads over two spine joints for a rounded back; the torso
+  // counter-rotates against the hips through carves for that wound-up look
+  RX(parts.spine, spineBase * 0.45 + wobS * 0.5);
+  RZ(parts.spine, -steer * 0.12 + wobS * 0.3);
+  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18);
+  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5);
+  RZ(parts.chest, -steer * 0.12);
+  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14);
+  RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75);
+  RZ(parts.neck, steer * 0.38);
+  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2);
 
   for (const [i, leg] of parts.legs.entries()) {
     const { a, b } = legAngles[i];
-    leg.hip.rotation.x = -a;
-    leg.knee.rotation.x = b;
-    leg.ankle.rotation.x = a - b; // levels the boot on the deck
+    RX(leg.hip, -a);
+    RX(leg.knee, b);
+    RX(leg.ankle, a - b); // levels the boot on the deck
     // boots stay bound to the deck line whatever the hips do
-    leg.ankle.rotation.y = -parts.pelvis.rotation.y + rider.gearGroup.rotation.y;
+    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y);
   }
 
+  // arm stance targets blend by state weight instead of hard branches
   for (const arm of parts.arms) {
+    let sx, sz, ex, wx;
     if (knocked > 0.3) {
-      arm.shoulder.rotation.x = -1.2 + wobA;
-      arm.shoulder.rotation.z = arm.side * 1.2;
-      arm.elbow.rotation.x = -0.4;
-      arm.wrist.rotation.x = 0;
-    } else if (airborne) {
-      arm.shoulder.rotation.x = -0.5 + wobA;
-      arm.shoulder.rotation.z = arm.side * (1.15 + stumble * 0.4);
-      arm.elbow.rotation.x = -0.5;
-      arm.wrist.rotation.x = -0.2;
+      sx = -1.2 + wobA; sz = arm.side * 1.2; ex = -0.4; wx = 0;
     } else if (idle) {
-      arm.shoulder.rotation.x = 0.12;
-      arm.shoulder.rotation.z = arm.side * 0.16;
-      arm.elbow.rotation.x = -0.35;
-      arm.wrist.rotation.x = -0.15;
+      sx = 0.12; sz = arm.side * 0.16; ex = -0.35; wx = -0.15;
     } else if (isBoard) {
       // balance arms: relaxed droop, trailing arm rises with edge angle
-      arm.shoulder.rotation.x = 0.2 + wobA + bk * -0.3;
-      arm.shoulder.rotation.z = arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45;
-      arm.elbow.rotation.x = -0.55;
-      arm.wrist.rotation.x = arm.side * steer * 0.2; // palms working the air
+      sx = 0.2 + wobA + bk * -0.3;
+      sz = arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45;
+      ex = -0.55;
+      wx = arm.side * steer * 0.2;
     } else {
-      arm.shoulder.rotation.x = 0.55 + tuck * 0.65 + bk * -0.35 + wobA;
-      arm.shoulder.rotation.z = arm.side * (0.32 - tuck * 0.18 + bk * 0.5);
-      arm.elbow.rotation.x = -1.05 - tuck * 0.55;
-      // wrists cock back so the poles trail; plant forward when braking
-      arm.wrist.rotation.x = 0.35 + tuck * 0.25 - bk * 0.5;
+      sx = 0.55 + tuck * 0.65 + bk * -0.35 + wobA;
+      sz = arm.side * (0.32 - tuck * 0.18 + bk * 0.5);
+      ex = -1.05 - tuck * 0.55;
+      wx = 0.35 + tuck * 0.25 - bk * 0.5;
     }
+    // airborne arms spread for balance, mixed in continuously
+    if (!idle && knocked <= 0.3) {
+      sx = sx * (1 - air) + (-0.5 + wobA) * air;
+      sz = sz * (1 - air) + arm.side * (1.15 + stumble * 0.4) * air;
+      ex = ex * (1 - air) + -0.5 * air;
+      wx = wx * (1 - air) + -0.2 * air;
+    }
+    RX(arm.shoulder, sx);
+    RZ(arm.shoulder, sz);
+    RX(arm.elbow, ex);
+    RX(arm.wrist, wx);
   }
   for (const pole of parts.poles) {
-    pole.rotation.x = -1.15 - tuck * 0.35;
+    RX(pole, -1.15 - tuck * 0.35);
   }
 }

@@ -35,7 +35,9 @@ const putBotOnPlayer = (mode) => page.evaluate((m) => {
   const race = window.__fp.race;
   const bot = race.bots.find((b) => b.ahead);
   bot.d = -race.player.pos.z;
-  bot._pushX = race.player.pos.x - bot.lineAt(bot.d);
+  // put the PLAYER on the bot's natural line — no push offset to decay away
+  race.player.pos.x = bot.lineAt(bot.d);
+  bot._pushX = 0;
   bot._aggroBlend = 0;
   bot._collideCd = 0;
   if (m === 'botFast') bot.speed = race.player.speed + 14;

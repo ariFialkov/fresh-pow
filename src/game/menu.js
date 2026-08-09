@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Terrain } from './terrain.js';
 import { createRider, setPose } from './riderMesh.js';
 import { MenuHud } from './hud.js';
-import { makeSky, addLights, Snowfall } from './world.js';
+import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { mulberry32 } from './rng.js';
 import { pickBots } from './names.js';
 import { EQUIPMENT } from './equipment.js';
@@ -38,7 +38,9 @@ export class MenuScene {
     this.terrain.build(tg);
     this.scene.add(tg);
     this.scene.add(makeSky());
-    addLights(this.scene);
+    this.sun = addLights(this.scene).sun;
+    const gate = this.terrain.gateLanes[2];
+    aimSun(this.sun, new THREE.Vector3(gate.x, this.terrain.heightAt(gate.x, gate.z), gate.z));
     this.snow = new Snowfall(this.scene, 350);
 
     // lane 2 (center) is the player's; bots take the rest

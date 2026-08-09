@@ -221,7 +221,7 @@ export class Bot {
       });
     } else {
       setPose(this.rider, {
-        steer: clamp(carve, -1, 1) * 0.7,
+        steer: clamp(carve, -1, 1) * 0.7 * clamp(this.speed / 26, 0.15, 1),
         tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
         stumble: this.stumbleT > 0 ? 1 : 0,
         knocked,
