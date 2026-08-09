@@ -8,7 +8,7 @@ import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, Snowfall } from './world.js';
 import { SprayPool, Trail } from './snowfx.js';
-import { mulberry32 } from './rng.js';
+import { mulberry32, smoothstep } from './rng.js';
 import { drawOutcome, multiplierFor } from './rtp.js';
 import { state, save } from './state.js';
 
@@ -49,16 +49,25 @@ export class RaceScene {
     this.playerTrail = new Trail(this.scene, this.terrain, opts.gear.type === 'ski' ? 0.3 : 0.36);
 
     this.bots = opts.bots.map((b, i) => {
+      const rank = this.outcome.botPositions[i];
+      const ahead = rank < this.outcome.playerPos;
+      // race scripts: some riders charge late, some lead early and fade —
+      // volatility theater on top of the deterministic draw
+      const roll = raceRng();
+      const script = ahead
+        ? roll < 0.4 ? 'lateCharge' : 'steady'
+        : roll < 0.45 ? 'earlyLead' : 'steady';
       const bot = new Bot({
         terrain: this.terrain,
         gear: b.gear,
         identity: b.identity,
         seed: (opts.seed % 1000) + i * 97 + raceRng() * 50,
-        rank: this.outcome.botPositions[i],
+        rank,
         playerRank: this.outcome.playerPos,
-        // strictly ordered by rank distance (jitter < spacing) so the bots
-        // also cross the line in their drawn order relative to each other
-        finalGap: Math.abs(this.outcome.botPositions[i] - this.outcome.playerPos) * 10 + 3 + raceRng() * 4,
+        // tight, strictly ordered gaps (jitter < spacing): photo-finish
+        // margins that still cross in the drawn order
+        finalGap: Math.abs(rank - this.outcome.playerPos) * 4.5 + 2 + raceRng() * 2.5,
+        script,
         lane: this.terrain.gateLanes[b.lane],
       });
       this.scene.add(bot.obj);
@@ -204,7 +213,7 @@ export class RaceScene {
     const playerD = this.player.progress;
     const active = this.bots.filter((b) => !b.finished);
     if (!active.length) return;
-    const near = Math.max(playerD, ...active.map((b) => b.d)) > 0.8 * COURSE.length;
+    const near = Math.max(playerD, ...active.map((b) => b.d)) > 0.86 * COURSE.length;
     if (!near) return;
 
     active.sort((a, b) => a.rank - b.rank); // rank 1 must cross first = largest d
@@ -213,14 +222,17 @@ export class RaceScene {
       const worse = active[i + 1];
       const need = worse.d + 2.2 - better.d;
       if (need > 0) {
-        // urgent when the worse-ranked rider is about to cross
-        const rate = worse.d > COURSE.length - 8 ? 60 : 16;
+        // urgent when the worse-ranked rider is closing on the line
+        const rate = worse.d > COURSE.length - 25 ? 80 : 18;
         better.d += Math.min(need, rate * dt);
       }
     }
     if (!this.player.finished) {
+      // same progressive ceiling the bots use themselves — never a snap-back
+      const L = COURSE.length;
+      const allowance = 38 * (1 - smoothstep(L - 260, L - 130, playerD));
       for (const b of active) {
-        if (!b.ahead) b.d = Math.min(b.d, Math.max(playerD - 4, 2));
+        if (!b.ahead) b.d = Math.min(b.d, Math.max(playerD - 4 + allowance, 2), L - 55);
       }
     }
   }
@@ -238,25 +250,25 @@ export class RaceScene {
       ...this.bots.map((b) => ({ pos: b.rank, name: b.identity.name, color: b.identity.color, me: false })),
     ].sort((a, b) => a.pos - b.pos);
 
-    setTimeout(() => {
-      if (this._resultsShown) return;
-      this._resultsShown = true;
-      showResults({
-        standings: rows,
-        playerPos,
-        bet,
-        payout,
-        style: this.player.style,
-        onAgain: () => this.cb.onExit('again'),
-        onLodge: () => this.cb.onExit('lodge'),
-      });
-    }, 1600);
+    if (this._resultsShown) return;
+    this._resultsShown = true;
+    showResults({
+      standings: rows,
+      playerPos,
+      bet,
+      payout,
+      style: this.player.style,
+      onAgain: () => this.cb.onExit('again'),
+      onLodge: () => this.cb.onExit('lodge'),
+    });
   }
 
   _updateCamera(dt, snap) {
     const p = this.player.pos;
-    const yaw = this.player.yaw * 0.5;
-    const back = 8.5;
+    // tight, steady chase: shallow yaw coupling and slow smoothing so the
+    // camera glides instead of whipping with every carve
+    const yaw = this.player.yaw * 0.32;
+    const back = 7.0;
     const target = new THREE.Vector3(
       p.x - Math.sin(yaw) * back,
       0,
@@ -264,19 +276,22 @@ export class RaceScene {
     );
     // keep the camera above terrain behind the player
     const ground = this.terrain.heightAt(target.x, target.z);
-    target.y = Math.max(p.y + 3.6, ground + 2.2);
+    target.y = Math.max(p.y + 3.0, ground + 2.0);
 
-    if (snap) this._camPos.copy(target);
-    else {
-      const k = 1 - Math.exp(-dt * 5.5);
+    if (snap) {
+      this._camPos.copy(target);
+      this._lookAt = new THREE.Vector3(p.x, p.y + 1.3, p.z - 4);
+    } else {
+      const k = 1 - Math.exp(-dt * 3.6);
       this._camPos.lerp(target, k);
+      this._lookAt.lerp(new THREE.Vector3(p.x, p.y + 1.3, p.z - 4), 1 - Math.exp(-dt * 6));
     }
     this.camera.position.copy(this._camPos);
-    this.camera.lookAt(p.x, p.y + 1.4, p.z - 4);
+    this.camera.lookAt(this._lookAt);
 
-    // speed widens the lens — the "wind in your face" cue
-    const targetFov = 62 + this.player.speed * 0.36 + (this.player.airborne ? 3 : 0);
-    const fov = this.camera.fov + (targetFov - this.camera.fov) * Math.min(1, dt * 4);
+    // speed widens the lens gently — the "wind in your face" cue
+    const targetFov = 58 + this.player.speed * 0.22 + (this.player.airborne ? 2 : 0);
+    const fov = this.camera.fov + (targetFov - this.camera.fov) * Math.min(1, dt * 2.2);
     if (Math.abs(fov - this.camera.fov) > 0.02) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();

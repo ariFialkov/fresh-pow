@@ -38,11 +38,51 @@ export class Terrain {
       s += 380 + rng() * 260;
     }
 
+    // one mega cliff for the drama
+    const megaS = 700 + rng() * 600;
+    if (!this.jumps.some((j) => Math.abs(j.s - megaS) < 80)) {
+      this.drops.push({ s: megaS, h: 12 + rng() * 5 });
+    }
+
     this.crevices = [];
     for (let i = 0; i < 4; i++) {
       const cs = 250 + rng() * (COURSE.length - 500);
       if (this.jumps.some((j) => Math.abs(j.s - cs) < 50)) continue;
       this.crevices.push({ s: cs, x: this.centerAt(cs) + (rng() - 0.5) * 70, w: 14 + rng() * 12, d: 2.5 + rng() * 2 });
+    }
+
+    // ice bridges: a crosswise snow ridge with a portal gap — ride the ridge
+    // over the top, or thread the arch through the underpass
+    this.bridges = [];
+    let bs = 340 + rng() * 160;
+    while (bs < COURSE.length - 320) {
+      const clear = !this.jumps.some((j) => Math.abs(j.s - bs) < 80) && !this.drops.some((d) => Math.abs(d.s - bs) < 90);
+      if (clear) {
+        this.bridges.push({
+          s: bs,
+          h: 6 + rng() * 2.5,
+          gapX: this.centerAt(bs) + (rng() - 0.5) * 42,
+          gapW: 12 + rng() * 4,
+          len: 21,
+        });
+        bs += 420 + rng() * 260;
+      } else {
+        // blocked by a jump or cliff — slide downhill and try again soon
+        bs += 70 + rng() * 40;
+      }
+    }
+
+    // spines: long ridges running down the fall line — pick a side
+    this.spines = [];
+    for (let i = 0; i < 2; i++) {
+      const s0 = 420 + rng() * 700;
+      this.spines.push({
+        s0,
+        s1: s0 + 220 + rng() * 200,
+        xOff: (rng() < 0.5 ? -1 : 1) * (10 + rng() * 18),
+        h: 3.2 + rng() * 2.4,
+        w: 7 + rng() * 4,
+      });
     }
 
     // ---- obstacles (collidable) + scenery ----
@@ -68,10 +108,12 @@ export class Terrain {
       const edge = COURSE.halfWidth * (0.55 + rng() * 0.75);
       addTree(this.centerAt(ts) + side * edge, ts, edge < COURSE.halfWidth);
     }
+    const nearBridge = (ts) => this.bridges.some((b) => Math.abs(b.s - ts) < b.len + 12);
     for (let i = 0; i < 60; i++) {
       const ts = 120 + rng() * (COURSE.length - 200);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.5;
       if (this.jumps.some((j) => Math.abs(j.s - ts) < 45 && Math.abs(j.x - x) < j.w + 8)) continue;
+      if (nearBridge(ts)) continue;
       addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
     }
     // sparse trees inside the run for slalom danger
@@ -79,6 +121,7 @@ export class Terrain {
       const ts = 140 + rng() * (COURSE.length - 260);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.2;
       if (this.jumps.some((j) => Math.abs(j.s - ts) < 45)) continue;
+      if (nearBridge(ts)) continue;
       addTree(x, ts, true);
     }
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
@@ -129,9 +172,33 @@ export class Terrain {
       else if (s > j.s && s < j.s + 34) h -= 2.8 * (1 - (s - j.s) / 34) * lat; // carved landing
     }
 
+    // corduroy striations: fine grooves running down the fall line
+    const striae = smoothstep(0.3, 0.7, noise1(su * 0.0031 + 3.3, this.seed + 12) * 0.5 + 0.5);
+    h += 0.85 * Math.sin(x * 0.34 + su * 0.004 + this.ph[5]) * striae * rough;
+
     // cliff drops: full-width sharp step down
     for (const d of this.drops) {
       h -= d.h * smoothstep(0, 2.5, s - d.s);
+    }
+
+    // ice bridges: crosswise ridge with a portal gap at gapX
+    for (const b of this.bridges) {
+      const ds = (s - b.s) / b.len;
+      if (Math.abs(ds) < 1) {
+        const env = 0.5 + 0.5 * Math.cos(ds * Math.PI);
+        const gx = (x - b.gapX) / (b.gapW / 2);
+        const gap = Math.abs(gx) < 1 ? Math.cos((gx * Math.PI) / 2) ** 2 : 0;
+        h += b.h * env * (1 - gap);
+      }
+    }
+
+    // spines along the fall line
+    for (const sp of this.spines) {
+      if (s > sp.s0 - 50 && s < sp.s1 + 50) {
+        const env = smoothstep(sp.s0 - 40, sp.s0, s) * (1 - smoothstep(sp.s1, sp.s1 + 40, s));
+        const q = (x - (c + sp.xOff)) / sp.w;
+        h += sp.h * env * Math.exp(-q * q);
+      }
     }
 
     // crevices: narrow icy trenches
@@ -167,7 +234,31 @@ export class Terrain {
   build(group) {
     this._buildGround(group);
     this._buildInstances(group);
+    this._buildBridges(group);
     this._buildGatesAndFinish(group);
+  }
+
+  _buildBridges(group) {
+    // glassy ice arches framing each underpass portal
+    const iceMat = new THREE.MeshLambertMaterial({ color: 0xa8d8ee, transparent: true, opacity: 0.88 });
+    for (const b of this.bridges) {
+      const floorY = this.heightAt(b.gapX, -b.s);
+      for (const off of [-b.len * 0.32, b.len * 0.32]) {
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(b.gapW / 2 + 0.6, 1.5, 8, 14, Math.PI), iceMat);
+        arch.position.set(b.gapX, floorY + 0.4, -(b.s + off));
+        group.add(arch);
+      }
+      // a lintel bar joining the two arches so the tunnel reads from above
+      const lintel = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.4, 1.4, b.len * 0.64, 8),
+        iceMat
+      );
+      lintel.rotation.x = Math.PI / 2;
+      lintel.position.set(b.gapX - b.gapW / 2 - 0.6, floorY + 2.2, -b.s);
+      const lintel2 = lintel.clone();
+      lintel2.position.x = b.gapX + b.gapW / 2 + 0.6;
+      group.add(lintel, lintel2);
+    }
   }
 
   _buildGround(group) {

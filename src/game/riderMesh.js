@@ -342,15 +342,15 @@ export function setPose(rider, p = {}) {
   const crouch = p.crouch ?? 0;
   const speed = p.speedNorm ?? 0;
 
-  const wobS = stumble * Math.sin(t * 21) * 0.35;
-  const wobA = stumble * Math.sin(t * 17 + 1.3) * 0.5;
+  const wobS = stumble * Math.sin(t * 11) * 0.32;
+  const wobA = stumble * Math.sin(t * 9 + 1.3) * 0.45;
   const breathe = idle ? Math.sin(t * 1.7) * 0.5 + 0.5 : 0;
-  const pump = !idle && !airborne ? Math.sin(t * 8) * 0.05 * speed : 0;
+  const pump = !idle && !airborne ? Math.sin(t * 4.5) * 0.04 * speed : 0;
 
   // hockey-stop: gear and body swing perpendicular together, smoothly
   if (brake > 0 && !rider._wasBraking) rider._brakeSide = steer < -0.05 ? -1 : 1;
   rider._wasBraking = brake > 0;
-  const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 9);
+  const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 6);
   const bkYaw = rider._brakeSide * bk;
 
   // whole-body edge angle into the turn; knocked riders lie on their side

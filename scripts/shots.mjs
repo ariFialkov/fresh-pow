@@ -32,15 +32,25 @@ console.log('shot carve');
 await page.keyboard.up('d');
 await page.keyboard.down('w');
 
-for (const [label, s] of [['mid', 700], ['jump', null], ['finish', 1740]]) {
+for (const [label, s] of [['mid', 700], ['jump', null], ['bridge', 'bridge'], ['finish', 1740]]) {
   const target = await page.evaluate((want) => {
     const r = window.__fp.race;
-    const s = want ?? r.terrain.jumps[2]?.s - 40 ?? 500;
-    const x = r.terrain.centerAt(s);
-    r.player.pos.set(x, r.terrain.heightAt(x, -s), -s);
+    let s;
+    if (want === 'bridge') {
+      const b = r.terrain.bridges[0];
+      if (!b) return null;
+      s = b.s - 45;
+      const x = b.gapX;
+      r.player.pos.set(x, r.terrain.heightAt(x, -s), -s);
+    } else {
+      s = want ?? r.terrain.jumps[2]?.s - 40 ?? 500;
+      const x = r.terrain.centerAt(s);
+      r.player.pos.set(x, r.terrain.heightAt(x, -s), -s);
+    }
     r.player.speed = 24;
     return s;
   }, s);
+  if (target === null) { console.log(`skip ${label} (none on this seed)`); continue; }
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `scratch-${label}.png` });
   console.log(`shot ${label} at s=${target}`);

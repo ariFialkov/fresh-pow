@@ -83,6 +83,24 @@ export class Player {
 
     if (this.knockT > 0) this.knockT -= dt;
     const knocked = Math.max(0, Math.min(1, Math.min(this.knockT * 3, (1.7 - this.knockT) * 4)));
+    // after the line: ride it out with a hockey stop, then stand
+    if (this.finished) {
+      this.speed = Math.max(0, this.speed - 11 * dt);
+      const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const nx = this.pos.x + dir.x * this.speed * dt;
+      const nz = this.pos.z + dir.z * this.speed * dt;
+      this.pos.set(nx, this.terrain.heightAt(nx, nz), nz);
+      this.airborne = false;
+      this._sync(dt);
+      setPose(this.rider, {
+        brake: this.speed > 1.5 ? 1 : 0,
+        idle: this.speed <= 1.5,
+        t: this.t,
+        dt,
+      });
+      return;
+    }
+
     const stumbling = this.stumbleT > 0 || this.knockT > 0;
     if (this.stumbleT > 0) this.stumbleT -= dt;
     this.landComp = Math.max(0, this.landComp - dt * 2.6);
@@ -90,7 +108,7 @@ export class Player {
     // ---- steering ----
     const steerIn = stumbling ? inp.steer * 0.25 : inp.steer;
     const targetYaw = clamp(steerIn, -1, 1) * MAX_YAW;
-    this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.2 : 5.2), 0, 1));
+    this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.0 : 3.4), 0, 1));
 
     const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
 
@@ -110,6 +128,13 @@ export class Player {
       if (braking) a -= BRAKE_DECEL;
       if (stumbling) a -= 6;
       if (this.knockT > 0) a -= 10; // sliding on your side scrubs hard
+
+      // never stuck: at a crawl, leaning forward skates/poles you up to
+      // walking pace anywhere — the push also cancels uphill gravity so even
+      // the steepest kicker face or ridge back can be climbed out of
+      if (tucking && this.speed < 5 && !braking) {
+        a += 3.4 + Math.max(0, -slope) * G * 0.95;
+      }
 
       // fresh brake press throws a plume off the now-sideways edge
       if (braking && !this._wasBraking && this.fx && this.speed > 8) {
@@ -157,7 +182,7 @@ export class Player {
       const ground = t.heightAt(nx, nz);
 
       // animate tricks toward their targets
-      const spinRate = 7.5, flipRate = 6.5;
+      const spinRate = 6.2, flipRate = 5.4;
       this.spinDone = approach(this.spinDone, this.trickSpin, spinRate * dt);
       this.flipDone = approach(this.flipDone, this.trickFlip, flipRate * dt);
 

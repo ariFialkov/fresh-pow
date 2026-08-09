@@ -60,7 +60,7 @@ export class Bot {
 
   /** Lateral line this bot follows at distance s. */
   lineAt(s) {
-    const weave = Math.sin(s * 0.045 + this.weavePhase) * 7 + Math.sin(s * 0.013 + this.weavePhase * 2) * 6;
+    const weave = Math.sin(s * 0.03 + this.weavePhase) * 7 + Math.sin(s * 0.009 + this.weavePhase * 2) * 6;
     const laneBias = this.personality * 0.35;
     const x = this.terrain.centerAt(s) + clamp(weave + laneBias, -COURSE.halfWidth * 0.8, COURSE.halfWidth * 0.8);
     return x;
@@ -92,26 +92,44 @@ export class Bot {
 
     let v;
     if (this.finished) {
-      // glide out and stop in the corral
-      v = Math.max(0, this.speed - 8 * dt);
+      // hockey-stop into the corral
+      v = Math.max(0, this.speed - 13 * dt);
     } else if (this.autopilot || playerFinished || (!this.ahead && this.d > L - 45)) {
       // free running to the line. Ahead-bots stay on the pacing controller all
       // the way across so their drawn gaps (and order) hold to the line.
       v = Math.min(this.speed + 6 * dt, CRUISE + this.personality * 0.2);
     } else {
       // ---- paced racing around the player ----
-      const drama = 30 * noise1(this._t * 0.07 + this.seed * 7.1, 313) + this.personality;
-      // blend to the drawn gaps early enough that the pack sorts itself well
-      // before the line, and stiffen the controller as it locks in
-      const blend = smoothstep(0.58 * L, 0.85 * L, Math.max(playerD, this.d));
+      // race-script bias: late chargers lurk behind then surge; early
+      // leaders (destined behind) show out front before fading
+      let bias = 0;
+      if (this.script === 'lateCharge') bias = -24 * (1 - smoothstep(0.55 * L, 0.8 * L, playerD));
+      else if (this.script === 'earlyLead') bias = 20 * (1 - smoothstep(0.5 * L, 0.82 * L, playerD));
+
+      let drama = 30 * noise1(this._t * 0.16 + this.seed * 7.1, 313) + this.personality + bias;
+      // soft-compress the ahead side so nobody pins against the allowance
+      // ceiling — leads breathe and trade instead of freezing at max
+      if (drama > 0) drama = 30 * Math.tanh(drama / 30);
+      // hold the drama late — the rate-limited order enforcement in the race
+      // scene guarantees the drawn crossing order regardless
+      const blend = smoothstep(0.66 * L, 0.9 * L, Math.max(playerD, this.d));
       const gap = this.ahead ? Math.abs(this.finalGap) : -Math.abs(this.finalGap);
-      const offset = lerp(drama, gap, blend);
+      // micro-battles persist all the way to the line (amplitude stays under
+      // half the gap spacing so it can never flip the order)
+      const wiggle = 6 * noise1(this._t * 0.45 + this.seed * 2.9, 401) * (1 - blend * 0.7);
+      const offset = lerp(drama, gap, blend) + wiggle;
       const desired = playerD + offset;
       // ahead-bots rubber-band above the player's speed so a tucked sprint
       // can never out-run a rider destined to finish in front
-      const vmax = this.ahead ? Math.max(VMAX, race.player.speed + 8) : VMAX;
+      let vmax = this.ahead ? Math.max(VMAX, race.player.speed + 8) : VMAX;
+      // no holeshot: off the start the pack accelerates with the player
+      // instead of blasting away at cruise while they're still winding up
+      if (this.d < 220) vmax = Math.min(vmax, race.player.speed + 7);
       const gain = GAIN * (1 + blend * 1.2);
-      v = clamp(CRUISE + gain * (desired - this.d), this.ahead ? 5 : 0, vmax);
+      // feed-forward on the player's actual speed: zero steady-state error at
+      // any pace, so the drama offsets are what you actually see on the snow
+      const base = clamp(race.player.speed, 6, 44);
+      v = clamp(base + gain * (desired - this.d), this.ahead ? 5 : 0, vmax);
 
       // scripted drama: brief stumbles when the pacing noise dives
       if (this.stumbleT <= 0 && noise1(this._t * 0.11 + this.seed * 3.7, 577) > 0.86) {
@@ -141,9 +159,13 @@ export class Bot {
     this.speed = lerp(this.speed, v, clamp(dt * 2.5, 0, 1));
     this.d += this.speed * dt;
 
-    // the "finishes behind" guarantee — never cross before the player does
+    // the "finishes behind" guarantee — mid-race these riders may genuinely
+    // lead (that's the volatility), but the allowance tapers to zero on the
+    // approach so they never cross before the player, and nobody parks
+    // within 55 m of an unfinished line
     if (!this.ahead && !playerFinished && !this.finished) {
-      this.d = Math.min(this.d, Math.max(playerD - 4, 2));
+      const allowance = 38 * (1 - smoothstep(L - 260, L - 130, playerD));
+      this.d = Math.min(this.d, Math.max(playerD - 4 + allowance, 2), L - 55);
     }
     // the "finishes ahead" guarantee — as the player closes on the line, a
     // rider destined in front is always in front, with rank-ordered floors so
@@ -188,17 +210,27 @@ export class Bot {
       this.rider.rig.rotation.x = Math.atan2(-n.z, n.y) * -0.85;
     }
 
-    const carve = Math.cos(this.d * 0.045 + this.weavePhase);
-    setPose(this.rider, {
-      steer: clamp(carve, -1, 1) * 0.7,
-      tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
-      stumble: this.stumbleT > 0 ? 1 : 0,
-      knocked,
-      airborne,
-      speedNorm: clamp(this.speed / 42, 0, 1),
-      t: this._t + this.weavePhase,
-      dt,
-    });
+    const carve = Math.cos(this.d * 0.03 + this.weavePhase);
+    if (this.finished) {
+      // brake out after the line, then stand in the corral
+      setPose(this.rider, {
+        brake: this.speed > 2 ? 1 : 0,
+        idle: this.speed <= 2,
+        t: this._t + this.weavePhase,
+        dt,
+      });
+    } else {
+      setPose(this.rider, {
+        steer: clamp(carve, -1, 1) * 0.7,
+        tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
+        stumble: this.stumbleT > 0 ? 1 : 0,
+        knocked,
+        airborne,
+        speedNorm: clamp(this.speed / 42, 0, 1),
+        t: this._t + this.weavePhase,
+        dt,
+      });
+    }
 
     // powder off the carves (cheaper budget than the player's spray)
     if (race.fx && !airborne && this.speed > 10) {

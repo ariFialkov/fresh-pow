@@ -123,17 +123,18 @@ export class MenuScene {
       r.rig.rotation.z = Math.sin(this.t * 1.3 + i * 2.1) * 0.03;
     }
 
-    // slow cinematic drift behind the gates, looking down the mountain
+    // slow cinematic drift on the DOWNHILL side of the gates, looking back up
+    // at the riders with sky behind them — never through the backstop
     const lane = this.terrain.gateLanes[2];
     const gy = this.terrain.heightAt(lane.x, lane.z);
-    const a = this.t * 0.08;
-    this.camera.position.set(
-      lane.x + Math.sin(a) * 10,
-      gy + 6.5 + Math.sin(this.t * 0.21) * 0.8,
-      lane.z + 16 + Math.cos(a) * 3
-    );
-    const lookAhead = this.terrain.centerAt(120);
-    this.camera.lookAt(lookAhead, this.terrain.heightAt(lookAhead, -120) + 4, -120);
+    const a = this.t * 0.07;
+    const cx = lane.x + Math.sin(a) * 8;
+    const cz = lane.z - 11 - Math.cos(a * 0.6) * 2; // in front of (below) the gates
+    const groundAtCam = this.terrain.heightAt(cx, cz);
+    const cy = Math.max(gy + 1.7 + Math.sin(this.t * 0.18) * 0.4, groundAtCam + 1.8);
+    this.camera.position.set(cx, cy, cz);
+    // aim just above the gate line so the riders stand against the sky
+    this.camera.lookAt(lane.x, gy + 2.0, lane.z);
 
     this.snow.update(dt, this.camera.position);
   }

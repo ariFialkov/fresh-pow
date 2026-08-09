@@ -53,3 +53,30 @@ for (let step = 0; step <= 60 * 90; step++) {
   }
   if (-pos.z >= COURSE.length) { console.log(`FINISHED at t=${(step / 60).toFixed(1)}s`); break; }
 }
+
+// ---- stuck-escape check: drop the rider dead-stopped on every jump ramp
+// face and every bridge back, hold tuck, and require forward progress ----
+let allEscaped = true;
+const spots = [
+  ...terrain.jumps.map((j) => ({ what: 'jump ramp', x: j.x, s: j.s - 4 })),
+  ...terrain.bridges.map((b) => ({ what: 'bridge back', x: b.gapX + b.gapW / 2 + 6, s: b.s - 8 })),
+];
+for (const spot of spots) {
+  let s = spot.s;
+  let v = 0;
+  let escaped = false;
+  for (let i = 0; i < 60 * 25; i++) {
+    const h0 = terrain.heightAt(spot.x, -s);
+    const h1 = terrain.heightAt(spot.x, -(s + 1.6));
+    const slope = (h0 - h1) / 1.6;
+    let a = G * slope - DRAG_K * TUCK_DRAG * v * v;
+    if (v < 5) a += 3.4 + Math.max(0, -slope) * G * 0.95; // skate push
+    v = Math.max(0, v + a * dt);
+    s += v * dt;
+    if (s > spot.s + 30) { escaped = true; break; }
+  }
+  console.log(`${spot.what} @${spot.s.toFixed(0)}m: ${escaped ? 'escaped' : 'STUCK'}`);
+  if (!escaped) allEscaped = false;
+}
+if (!allEscaped) { console.error('STUCK CHECK FAILED'); process.exit(1); }
+console.log('stuck check OK');
