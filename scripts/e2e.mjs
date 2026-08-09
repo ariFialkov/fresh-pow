@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 import { preview } from 'vite';
 
-const server = await preview({ preview: { port: 4175, strictPort: true } });
+const server = await preview({ preview: { port: Number(process.env.PORT || 4175), strictPort: true } });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 const errors = [];
@@ -13,8 +13,8 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
 const fail = (msg) => { console.error('E2E FAILED:', msg); process.exit(1); };
 
-await page.goto('http://localhost:4175/');
-await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, { timeout: 20000 });
+await page.goto(`http://localhost:${process.env.PORT || 4175}/`);
+await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
 
 const balanceBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance ?? 1000);
 await page.click('#start-btn');

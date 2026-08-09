@@ -7,7 +7,7 @@ const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto('http://localhost:4174/');
-await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, { timeout: 20000 });
+await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
 
 // measure fps
 const fps = await page.evaluate(() => new Promise((res) => {

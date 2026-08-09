@@ -50,12 +50,39 @@ addEventListener('resize', () => {
   if (current) current.resize(innerWidth, innerHeight);
 });
 
+// Adaptive resolution: drop render scale on devices that can't hold frame
+// rate, climb back when there's headroom. Keeps powder + dense terrain smooth
+// on weak phones without touching capable hardware.
+const MAX_DPR = Math.min(devicePixelRatio, 2);
+let dprScale = 1;
+let fpsAcc = 0;
+let fpsN = 0;
+let fpsTimer = 0;
+
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
   if (current) {
     current.update(dt);
     renderer.render(current.scene, current.camera);
+  }
+
+  fpsAcc += rawDt;
+  fpsN++;
+  fpsTimer += rawDt;
+  if (fpsTimer > 3 && fpsN > 10) {
+    const fps = fpsN / fpsAcc;
+    if (fps < 42 && dprScale > 0.55) dprScale = Math.max(0.55, dprScale - 0.15);
+    else if (fps > 56 && dprScale < 1) dprScale = Math.min(1, dprScale + 0.1);
+    const target = MAX_DPR * dprScale;
+    if (Math.abs(renderer.getPixelRatio() - target) > 0.01) {
+      renderer.setPixelRatio(target);
+      renderer.setSize(innerWidth, innerHeight);
+    }
+    fpsAcc = 0;
+    fpsN = 0;
+    fpsTimer = 0;
   }
 });
 

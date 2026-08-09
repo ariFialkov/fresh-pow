@@ -80,21 +80,24 @@ export class Bot {
     if (this.finished) {
       // glide out and stop in the corral
       v = Math.max(0, this.speed - 8 * dt);
-    } else if (this.autopilot || playerFinished || this.d > L - 45) {
-      // free running to the line (only reachable in this state if allowed ahead
-      // or the player already finished)
+    } else if (this.autopilot || playerFinished || (!this.ahead && this.d > L - 45)) {
+      // free running to the line. Ahead-bots stay on the pacing controller all
+      // the way across so their drawn gaps (and order) hold to the line.
       v = Math.min(this.speed + 6 * dt, CRUISE + this.personality * 0.2);
     } else {
       // ---- paced racing around the player ----
       const drama = 30 * noise1(this._t * 0.07 + this.seed * 7.1, 313) + this.personality;
-      const blend = smoothstep(0.7 * L, 0.93 * L, Math.max(playerD, this.d));
+      // blend to the drawn gaps early enough that the pack sorts itself well
+      // before the line, and stiffen the controller as it locks in
+      const blend = smoothstep(0.58 * L, 0.85 * L, Math.max(playerD, this.d));
       const gap = this.ahead ? Math.abs(this.finalGap) : -Math.abs(this.finalGap);
       const offset = lerp(drama, gap, blend);
       const desired = playerD + offset;
       // ahead-bots rubber-band above the player's speed so a tucked sprint
       // can never out-run a rider destined to finish in front
       const vmax = this.ahead ? Math.max(VMAX, race.player.speed + 8) : VMAX;
-      v = clamp(CRUISE + GAIN * (desired - this.d), this.ahead ? 5 : 0, vmax);
+      const gain = GAIN * (1 + blend * 1.2);
+      v = clamp(CRUISE + gain * (desired - this.d), this.ahead ? 5 : 0, vmax);
 
       // scripted drama: brief stumbles when the pacing noise dives
       if (this.stumbleT <= 0 && noise1(this._t * 0.11 + this.seed * 3.7, 577) > 0.86) {
@@ -114,9 +117,10 @@ export class Bot {
       this.d = Math.min(this.d, Math.max(playerD - 4, 2));
     }
     // the "finishes ahead" guarantee — as the player closes on the line, a
-    // rider destined in front is always at least a couple of meters in front
+    // rider destined in front is always in front, with rank-ordered floors so
+    // even a compressed pack crosses in its drawn order
     if (this.ahead && !playerFinished && !this.finished && playerD > L - 60) {
-      this.d = Math.max(this.d, playerD + 2.5);
+      this.d = Math.max(this.d, playerD + 2.5 + (this.playerRank - this.rank - 1) * 3);
     }
 
     // ---- place on the mountain ----
@@ -132,8 +136,13 @@ export class Bot {
       this.vFall = 0;
     }
     const airborne = this.y > ground + 0.2;
+    if (this._wasAirborne && !airborne && race.fx) {
+      race.fx.burst(this.obj.position, { x: 0, z: -1 }, { count: 14, speed: 4, up: 3, spread: 1.6, size: 1.2 });
+    }
+    this._wasAirborne = airborne;
 
     this.obj.position.set(x, this.y, z);
+    if (!airborne) this.obj.position.y -= 0.06;
 
     // heading from the line derivative
     const ahead = 3;
@@ -151,7 +160,27 @@ export class Bot {
       tuck: this.speed > 34 ? 1 : 0,
       stumble: this.stumbleT > 0 ? 1 : 0,
       airborne,
+      speedNorm: clamp(this.speed / 42, 0, 1),
+      t: this._t + this.weavePhase,
     });
+
+    // powder off the carves (cheaper budget than the player's spray)
+    if (race.fx && !airborne && this.speed > 10) {
+      const edge = Math.abs(carve);
+      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.05 * dt * 60;
+      const side = Math.sign(carve) || 1;
+      while (this._sprayAcc >= 1) {
+        this._sprayAcc -= 1;
+        race.fx.spawn(
+          x + side * 0.4, this.y + 0.05, z + 0.7,
+          side * (1 + edge * 3.5) + (Math.random() - 0.5) * 2,
+          1 + edge * 2 + Math.random() * 1.2,
+          2 + (Math.random() - 0.5) * 2,
+          0.6 + edge * 0.5,
+          0.45 + Math.random() * 0.35
+        );
+      }
+    }
 
     // shadow
     this.rider.shadow.position.y = ground - this.y + 0.06;

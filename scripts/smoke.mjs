@@ -23,7 +23,7 @@ console.log('menu mounted');
 await page.waitForFunction(() => {
   const b = document.querySelector('#start-btn');
   return b && !b.disabled;
-}, { timeout: 20000 });
+}, undefined, { timeout: 120000 });
 console.log('lobby full, start armed');
 
 // cycle gear a few times (exercises all three ride builders)

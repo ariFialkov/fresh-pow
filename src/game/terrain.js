@@ -3,6 +3,7 @@
 // crevices, boulders and tree lines. heightAt(x, z) is a pure function of the
 // seed so physics and rendering always agree.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 
 export const COURSE = {
@@ -170,48 +171,111 @@ export class Terrain {
   }
 
   _buildGround(group) {
+    // Snow material: Lambert plus injected view-dependent glints so the
+    // surface shimmers like real powder as the camera moves.
     const snowMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    const stripLen = 120;
-    const dx = 2.4;
-    const cols = Math.round((COURSE.meshHalfWidth * 2) / dx);
+    snowMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', 'varying vec3 vWPos;\n#include <common>')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', 'varying vec3 vWPos;\n#include <common>')
+        .replace(
+          '#include <dithering_fragment>',
+          `{
+            vec3 gi = floor(vWPos * 5.0);
+            float gh = fract(sin(dot(gi, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+            float dist = length(cameraPosition - vWPos);
+            vec3 vdir = (cameraPosition - vWPos) / dist;
+            vec3 gn = normalize(vec3(fract(gh * 13.7) - 0.5, 1.2, fract(gh * 7.3) - 0.5));
+            float glint = step(0.982, gh) * pow(max(dot(vdir, gn), 0.0), 14.0);
+            gl_FragColor.rgb += glint * 0.7 * exp(-dist * 0.012);
+          }
+          #include <dithering_fragment>`
+        );
+    };
+
+    // Non-uniform grid: fine cells in the riding corridor, coarse on the
+    // valley walls. Normals come analytically from heightAt so strip seams
+    // are invisible.
+    const FINE = 1.7, COARSE = 6.0, CORRIDOR = 74;
+    const xs = [];
+    for (let x = -COURSE.meshHalfWidth; x < -CORRIDOR; x += COARSE) xs.push(x);
+    for (let x = -CORRIDOR; x <= CORRIDOR; x += FINE) xs.push(x);
+    for (let x = CORRIDOR + COARSE; x <= COURSE.meshHalfWidth; x += COARSE) xs.push(x);
+
+    const stripLen = 102;
+    const rows = Math.round(stripLen / FINE);
     const colSnow = new THREE.Color(0xf2f7fd);
     const colIce = new THREE.Color(0xa8cdea);
     const colRock = new THREE.Color(0x7d8590);
     const tmp = new THREE.Color();
 
     for (let s0 = -60; s0 < COURSE.length + 180; s0 += stripLen) {
-      const rows = Math.round(stripLen / dx);
-      const geo = new THREE.PlaneGeometry(COURSE.meshHalfWidth * 2, stripLen, cols, rows);
-      geo.rotateX(-Math.PI / 2); // plane in xz, +y up
-      const pos = geo.attributes.position;
-      const colors = new Float32Array(pos.count * 3);
-      for (let i = 0; i < pos.count; i++) {
-        const lx = pos.getX(i);
-        const lz = pos.getZ(i);
-        const wx = lx + this.centerAt(s0 + stripLen / 2);
-        const wz = -(s0 + stripLen / 2) + lz;
-        const ws = -wz;
-        const y = this.heightAt(wx, wz);
-        pos.setY(i, y);
-        pos.setX(i, wx);
-        pos.setZ(i, wz);
+      const cx = this.centerAt(s0 + stripLen / 2);
+      const nx = xs.length, nz = rows + 1;
 
-        // color by steepness + altitude sparkle
-        const e = 1.2;
-        const slope = Math.hypot(
-          this.heightAt(wx + e, wz) - this.heightAt(wx - e, wz),
-          this.heightAt(wx, wz + e) - this.heightAt(wx, wz - e)
-        ) / (2 * e);
-        tmp.copy(colSnow);
-        if (slope > 0.85) tmp.lerp(colRock, clamp((slope - 0.85) / 0.9, 0, 1));
-        else tmp.lerp(colIce, clamp((slope - 0.45) / 1.2, 0, 0.35));
-        const sparkle = fbm2(wx * 0.15, ws * 0.15, this.seed + 77, 2) * 0.035;
-        colors[i * 3] = clamp(tmp.r + sparkle, 0, 1);
-        colors[i * 3 + 1] = clamp(tmp.g + sparkle, 0, 1);
-        colors[i * 3 + 2] = clamp(tmp.b + sparkle * 1.4, 0, 1);
+      // heights with one ghost cell on each side for finite-difference normals
+      const H = new Float32Array((nx + 2) * (nz + 2));
+      const gx = [xs[0] - FINE, ...xs, xs[nx - 1] + FINE];
+      const gz = [];
+      for (let j = -1; j <= nz; j++) gz.push(-(s0 + j * FINE * (stripLen / (rows * FINE))));
+      for (let j = 0; j < nz + 2; j++) {
+        for (let i = 0; i < nx + 2; i++) {
+          H[j * (nx + 2) + i] = this.heightAt(gx[i] + cx, gz[j]);
+        }
       }
+
+      const positions = new Float32Array(nx * nz * 3);
+      const normals = new Float32Array(nx * nz * 3);
+      const colors = new Float32Array(nx * nz * 3);
+      let v = 0;
+      for (let j = 0; j < nz; j++) {
+        for (let i = 0; i < nx; i++) {
+          const wx = xs[i] + cx;
+          const wz = gz[j + 1];
+          const h = H[(j + 1) * (nx + 2) + (i + 1)];
+          positions[v * 3] = wx;
+          positions[v * 3 + 1] = h;
+          positions[v * 3 + 2] = wz;
+
+          const hl = H[(j + 1) * (nx + 2) + i];
+          const hr = H[(j + 1) * (nx + 2) + (i + 2)];
+          const hd = H[j * (nx + 2) + (i + 1)];
+          const hu = H[(j + 2) * (nx + 2) + (i + 1)];
+          const dhdx = (hr - hl) / (gx[i + 2] - gx[i]);
+          const dhdz = (hu - hd) / (gz[j + 2] - gz[j]);
+          const inv = 1 / Math.hypot(dhdx, 1, dhdz);
+          normals[v * 3] = -dhdx * inv;
+          normals[v * 3 + 1] = inv;
+          normals[v * 3 + 2] = -dhdz * inv;
+
+          const slope = Math.hypot(dhdx, dhdz);
+          tmp.copy(colSnow);
+          if (slope > 0.85) tmp.lerp(colRock, clamp((slope - 0.85) / 0.9, 0, 1));
+          else tmp.lerp(colIce, clamp((slope - 0.45) / 1.2, 0, 0.35));
+          const grain = fbm2(wx * 0.21, -wz * 0.21, this.seed + 77, 2) * 0.03;
+          colors[v * 3] = clamp(tmp.r + grain, 0, 1);
+          colors[v * 3 + 1] = clamp(tmp.g + grain, 0, 1);
+          colors[v * 3 + 2] = clamp(tmp.b + grain * 1.5, 0, 1);
+          v++;
+        }
+      }
+
+      const index = [];
+      for (let j = 0; j < nz - 1; j++) {
+        for (let i = 0; i < nx - 1; i++) {
+          const a = j * nx + i;
+          index.push(a, a + 1, a + nx, a + 1, a + nx + 1, a + nx);
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      geo.computeVertexNormals();
+      geo.setIndex(index);
+      geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, snowMat);
       mesh.frustumCulled = true;
       group.add(mesh);
@@ -220,10 +284,14 @@ export class Terrain {
 
   _buildInstances(group) {
     // trees: trunk + two foliage cones merged per-instance via two instanced meshes
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1.4, 5);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1.4, 6);
     trunkGeo.translate(0, 0.7, 0);
-    const foliageGeo = new THREE.ConeGeometry(1.5, 4.2, 7);
-    foliageGeo.translate(0, 3.2, 0);
+    // layered spruce: two cones + a snow-dusted cap
+    const lower = new THREE.ConeGeometry(1.6, 3.0, 8);
+    lower.translate(0, 2.4, 0);
+    const upper = new THREE.ConeGeometry(1.1, 2.6, 8);
+    upper.translate(0, 3.9, 0);
+    const foliageGeo = mergeGeometries([lower, upper]);
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a4630 });
     const foliageMat = new THREE.MeshLambertMaterial({ color: 0x2e5d46 });
     const nTrees = this._treeXf.length;
@@ -243,7 +311,7 @@ export class Terrain {
     });
     group.add(trunks, foliage);
 
-    const rockGeo = new THREE.IcosahedronGeometry(1.1, 0);
+    const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
     rockGeo.translate(0, 0.55, 0);
     const rockMat = new THREE.MeshLambertMaterial({ color: 0x8b93a1, flatShading: true });
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, this._rockXf.length);

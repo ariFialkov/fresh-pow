@@ -3,7 +3,7 @@
 // by one and take their gates; the player picks a ride and a bet.
 import * as THREE from 'three';
 import { Terrain } from './terrain.js';
-import { createRider } from './riderMesh.js';
+import { createRider, setPose } from './riderMesh.js';
 import { MenuHud } from './hud.js';
 import { makeSky, addLights, Snowfall } from './world.js';
 import { mulberry32 } from './rng.js';
@@ -113,9 +113,11 @@ export class MenuScene {
       }
     }
 
-    // idle sway for everyone in the gates
+    // idle breathing + subtle sway for everyone in the gates
     for (const [i, r] of [this.playerRider, ...this.botRiders].entries()) {
-      if (r) r.rig.rotation.z = Math.sin(this.t * 1.3 + i * 2.1) * 0.04;
+      if (!r) continue;
+      setPose(r, { idle: true, t: this.t + i * 1.7 });
+      r.rig.rotation.z = Math.sin(this.t * 1.3 + i * 2.1) * 0.03;
     }
 
     // slow cinematic drift behind the gates, looking down the mountain

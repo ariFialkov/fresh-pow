@@ -8,12 +8,29 @@ const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 page.on('pageerror', (e) => console.error('pageerror:', e));
 
 await page.goto('http://localhost:4176/');
-await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, { timeout: 20000 });
+await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
 await page.click('#start-btn');
 await page.waitForFunction(() => !!window.__fp, { timeout: 5000 });
-await page.waitForTimeout(5500);
+// countdown runs on game time, which is slower than wall time headless
+await page.waitForFunction(() => window.__fp.race.stateName === 'racing', undefined, { timeout: 120000 });
 await page.keyboard.down('w');
 await page.waitForTimeout(3000);
+
+// carving shot: steer hard on the ground so spray + trail are visible
+await page.evaluate(() => {
+  const r = window.__fp.race;
+  const s = 500;
+  const x = r.terrain.centerAt(s);
+  r.player.pos.set(x, r.terrain.heightAt(x, -s), -s);
+  r.player.speed = 26;
+});
+await page.keyboard.up('w');
+await page.keyboard.down('d');
+await page.waitForTimeout(1800);
+await page.screenshot({ path: 'scratch-carve.png' });
+console.log('shot carve');
+await page.keyboard.up('d');
+await page.keyboard.down('w');
 
 for (const [label, s] of [['mid', 700], ['jump', null], ['finish', 1740]]) {
   const target = await page.evaluate((want) => {

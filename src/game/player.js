@@ -32,6 +32,9 @@ export class Player {
     this.frozen = true; // in the gate until GO
     this.finished = false;
     this.groundVy = 0; // smoothed terrain vertical rate -> launch impulse
+    this.landComp = 0; // knee compression after landings
+    this.fx = null; // SprayPool, wired up by the race scene
+    this.t = 0;
 
     // tricks
     this.trickSpin = 0; // target extra yaw revolutions (signed, radians)
@@ -68,14 +71,17 @@ export class Player {
     const t = this.terrain;
     const inp = this.input;
 
+    this.t += dt;
+
     if (this.frozen) {
       this._sync(dt);
-      setPose(this.rider, { tuck: inp.tuck ? 1 : 0 });
+      setPose(this.rider, { tuck: inp.tuck ? 1 : 0, idle: !inp.tuck, t: this.t });
       return;
     }
 
     const stumbling = this.stumbleT > 0;
     if (stumbling) this.stumbleT -= dt;
+    this.landComp = Math.max(0, this.landComp - dt * 2.6);
 
     // ---- steering ----
     const steerIn = stumbling ? inp.steer * 0.25 : inp.steer;
@@ -148,6 +154,17 @@ export class Player {
         const spinLeft = Math.abs(this.trickSpin - this.spinDone);
         const flipLeft = Math.abs(this.trickFlip - this.flipDone);
         const sloppy = spinLeft > 0.9 || flipLeft > 0.9;
+        const impact = Math.min(1, -this.vy / 14);
+        this.landComp = 0.4 + impact * 0.6;
+        if (this.fx) {
+          this.fx.burst(this.pos, dir, {
+            count: 10 + Math.round(impact * 26),
+            speed: 3 + impact * 6,
+            up: 2.5 + impact * 3,
+            spread: 1.4,
+            size: 1.3,
+          });
+        }
         if (sloppy) {
           this.stumble('crashed the landing');
           this.style = Math.max(0, this.style - 150);
@@ -164,6 +181,30 @@ export class Player {
       }
     }
 
+    // continuous powder: wake at speed, fans off carves, roost when braking
+    if (this.fx && !this.airborne && this.speed > 7) {
+      const carve = Math.abs(this.yaw) / MAX_YAW;
+      const braking = inp.brake && !stumbling ? 1 : 0;
+      const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
+      const rate = intensity * this.speed * 0.14;
+      this._sprayAcc = (this._sprayAcc || 0) + rate * dt * 60;
+      const side = Math.sign(this.yaw) || (Math.random() < 0.5 ? -1 : 1);
+      while (this._sprayAcc >= 1) {
+        this._sprayAcc -= 1;
+        const back = 0.6 + Math.random() * 0.5;
+        this.fx.spawn(
+          this.pos.x - dir.x * back + side * -dir.z * 0.35,
+          this.pos.y + 0.06,
+          this.pos.z - dir.z * back + side * dir.x * 0.35,
+          -dir.x * 2 + side * -dir.z * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
+          1.2 + carve * 2 + braking * 2.5 + Math.random() * 1.5,
+          -dir.z * 2 + side * dir.x * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
+          0.7 + carve * 0.5 + braking * 0.7,
+          0.5 + Math.random() * 0.4
+        );
+      }
+    }
+
     this._sync(dt);
 
     setPose(this.rider, {
@@ -172,6 +213,9 @@ export class Player {
       steer: this.yaw / MAX_YAW,
       stumble: stumbling ? 1 : 0,
       airborne: this.airborne,
+      crouch: this.landComp,
+      speedNorm: clamp(this.speed / 42, 0, 1),
+      t: this.t,
     });
   }
 
@@ -197,11 +241,17 @@ export class Player {
     this.stumbleT = 1.3;
     this.speed *= 0.35;
     if (this.hud) this.hud.stumbleFlash(reason);
+    if (this.fx) {
+      const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.fx.burst(this.pos, dir, { count: 26, speed: 5, up: 4, spread: 2.2, size: 1.4 });
+    }
   }
 
   _sync(dt) {
     const t = this.terrain;
     this.obj.position.copy(this.pos);
+    // riding IN the snow, not on it: settle slightly into the surface
+    if (!this.airborne) this.obj.position.y -= 0.05 + Math.min(0.04, this.speed * 0.001);
     this.obj.rotation.y = -this.yaw;
 
     // align to slope when grounded, trick rotations when flying
