@@ -524,33 +524,67 @@ export function setPose(rider, p = {}) {
     RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y, 16, 0.95);
   }
 
+  // ---- pole plants: entering a carve, the inside arm punches forward and
+  // stabs the pole, then recovers. Detected off the lean crossing into a
+  // new turn; each arm has its own plant clock. ----
+  const mix = (u, v, k) => u + (v - u) * k;
+  if (!rider._plant) rider._plant = { t: [0, 0], prevSteer: 0 };
+  const P = rider._plant;
+  const PLANT_DUR = 0.55;
+  P.t[0] = Math.max(0, P.t[0] - dt);
+  P.t[1] = Math.max(0, P.t[1] - dt);
+  if (rider.type === 'ski' && !idle && !airborne && tuck < 0.4 && brake < 0.3 && knocked < 0.2) {
+    const rising = Math.abs(steer) > 0.2 && Math.abs(P.prevSteer) <= 0.2;
+    const flipped = Math.sign(steer) !== Math.sign(P.prevSteer) && Math.abs(steer) > 0.14;
+    if (rising || flipped) {
+      const idx = steer > 0 ? 1 : 0; // inside arm of the new turn
+      if (P.t[idx] <= 0) P.t[idx] = PLANT_DUR;
+    }
+  }
+  P.prevSteer = steer;
+  // punchy pulse: fast attack, easy release
+  const plantEnv = P.t.map((rem) => {
+    if (rem <= 0) return 0;
+    const u = 1 - rem / PLANT_DUR;
+    return Math.sin(Math.PI * Math.pow(u, 0.6));
+  });
+
   // arm stance targets blend by state weight instead of hard branches
   for (const arm of parts.arms) {
+    const pi = arm.side > 0 ? 1 : 0;
+    const inside = arm.side * steer > 0 ? Math.abs(steer) : 0; // this arm is inside the carve
     let sx, sz, ex, wx;
     if (knocked > 0.3) {
       sx = -1.2 + wobA; sz = arm.side * 1.2; ex = 0.4; wx = 0;
     } else if (idle) {
-      sx = 0.12; sz = arm.side * 0.16; ex = 0.35; wx = -0.15;
+      sx = 0.12; sz = arm.side * 0.16; ex = 0.35 + swayB * 0.3; wx = -0.15;
     } else if (isBoard) {
-      // balance arms: relaxed droop, trailing arm rises with edge angle
-      sx = 0.2 + wobA + bk * -0.3;
-      sz = arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45;
-      ex = 0.55;
+      // balance arms working the carve: inside elbow folds, outside reaches;
+      // a tuck sweeps both arms straight back along the body
+      sx = mix(0.2 + wobA + bk * -0.3 + steer * arm.side * 0.25, -0.72 + wobA * 0.5, tuck);
+      sz = mix(arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45, arm.side * 0.15, tuck);
+      ex = mix(0.5 + inside * 0.55 + swayB * 0.35, 0.18, tuck);
       wx = arm.side * steer * 0.2;
     } else {
-      sx = 0.55 + tuck * 0.65 + bk * -0.35 + wobA;
-      sz = arm.side * (0.32 - tuck * 0.18 + bk * 0.5);
-      ex = 1.05 + tuck * 0.55;
-      wx = 0.35 + tuck * 0.25 - bk * 0.5;
+      // skier: hands ride in front, elbows pumping with the carve; the tuck
+      // sends both arms straight back with the poles trailing uphill; pole
+      // plants punch the inside hand forward with the elbow extending
+      const env = plantEnv[pi];
+      sx = mix(0.5 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + env * 0.95;
+      sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck);
+      ex = mix(0.9 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - env * 0.55;
+      wx = mix(0.35 - bk * 0.5, 0.05, tuck) - env * 0.85;
     }
-    // airborne arms: spread for balance, pull IN as the spin winds up
-    // (skater physics), and the leading arm reaches down into flips (grab)
+    // airborne arms: spread for balance, whip TOWARD the spin to feed it,
+    // pull in as it winds up (skater physics), flare back out as it dies,
+    // and the leading arm reaches down into flips (grab)
     if (!idle && knocked <= 0.3) {
-      const spread = 1.15 - Math.abs(twist) * 0.8 + stumble * 0.4;
+      const spread = 1.15 - Math.abs(twist) * 0.85 + stumble * 0.4;
       const grab = arm.side < 0 ? curl * 0.9 : curl * 0.25;
-      sx = sx * (1 - air) + (-0.5 + wobA + grab + Math.abs(twist) * 0.3) * air;
-      sz = sz * (1 - air) + arm.side * spread * air;
-      ex = ex * (1 - air) + (0.55 + grab * 0.5) * air;
+      const throwZ = twist * 0.55; // both arms swing toward the rotation
+      sx = sx * (1 - air) + (-0.5 + wobA + grab + Math.abs(twist) * 0.3 + twist * arm.side * 0.4) * air;
+      sz = sz * (1 - air) + (arm.side * spread + throwZ) * air;
+      ex = ex * (1 - air) + (0.55 + grab * 0.5 + Math.abs(twist) * 0.5) * air;
       wx = wx * (1 - air) + -0.2 * air;
     }
     // arms are loose masses: they trail the body and swing through stops
@@ -559,8 +593,10 @@ export function setPose(rider, p = {}) {
     RX(arm.elbow, ex, 9, 0.55);
     RX(arm.wrist, wx + swayB * 0.4, 7, 0.45);
   }
-  for (const pole of parts.poles) {
-    // poles swing on loose wrists — they whip and settle, never snap
-    RX(pole, -1.15 - tuck * 0.35 + longG * 0.3, 6, 0.45);
+  for (const [i, pole] of parts.poles.entries()) {
+    // poles trail at cruise, sweep flat back-uphill in a tuck, and swing
+    // forward to stab the snow on a plant
+    const env = plantEnv[i];
+    RX(pole, mix(-1.15, -2.05, tuck) + longG * 0.3 + env * 1.05, 6, 0.45);
   }
 }
