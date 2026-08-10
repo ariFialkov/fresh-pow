@@ -20,9 +20,14 @@ function getSprite() {
 }
 
 export class SprayPool {
-  constructor(scene, max = 900) {
+  /**
+   * @param {object} opts { color: [r,g,b] 0..1, blending, gravity } — defaults
+   *   are powder-white; pyro pools use warm colors + additive blending.
+   */
+  constructor(scene, max = 900, opts = {}) {
     this.max = max;
     this.cursor = 0;
+    this.gravity = opts.gravity ?? 7.5;
     this.pos = new Float32Array(max * 3);
     this.vel = new Float32Array(max * 3);
     this.age = new Float32Array(max).fill(1e9);
@@ -40,7 +45,11 @@ export class SprayPool {
     const mtl = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      uniforms: { uTex: { value: getSprite() } },
+      blending: opts.blending ?? THREE.NormalBlending,
+      uniforms: {
+        uTex: { value: getSprite() },
+        uColor: { value: new THREE.Vector3(...(opts.color ?? [0.97, 0.99, 1.0])) },
+      },
       vertexShader: `
         attribute float aSize; attribute float aAlpha; varying float vA;
         void main() {
@@ -50,10 +59,10 @@ export class SprayPool {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        uniform sampler2D uTex; varying float vA;
+        uniform sampler2D uTex; uniform vec3 uColor; varying float vA;
         void main() {
           vec4 c = texture2D(uTex, gl_PointCoord);
-          gl_FragColor = vec4(0.97, 0.99, 1.0, c.a * vA);
+          gl_FragColor = vec4(uColor, c.a * vA);
         }`,
     });
     this.points = new THREE.Points(geo, mtl);
@@ -106,7 +115,7 @@ export class SprayPool {
       }
       age[i] += dt;
       const k = age[i] / life[i];
-      vel[i * 3 + 1] -= 7.5 * dt; // light powder falls slowly
+      vel[i * 3 + 1] -= this.gravity * dt; // light powder falls slowly
       const drag = 1 - 1.6 * dt;
       vel[i * 3] *= drag;
       vel[i * 3 + 1] *= 1 - 0.4 * dt;

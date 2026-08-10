@@ -102,27 +102,79 @@ export class Terrain {
       if (collides) this.obstacles.push({ x, z, r: 1.3 * sc, kind: 'rock' });
     };
 
-    for (let i = 0; i < 260; i++) {
-      const ts = 60 + rng() * (COURSE.length + 60);
-      const side = rng() < 0.5 ? -1 : 1;
-      const edge = COURSE.halfWidth * (0.55 + rng() * 0.75);
-      addTree(this.centerAt(ts) + side * edge, ts, edge < COURSE.halfWidth);
-    }
     const nearBridge = (ts) => this.bridges.some((b) => Math.abs(b.s - ts) < b.len + 12);
-    for (let i = 0; i < 60; i++) {
-      const ts = 120 + rng() * (COURSE.length - 200);
-      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.5;
-      if (this.jumps.some((j) => Math.abs(j.s - ts) < 45 && Math.abs(j.x - x) < j.w + 8)) continue;
-      if (nearBridge(ts)) continue;
-      addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
+    const nearJump = (ts) => this.jumps.some((j) => Math.abs(j.s - ts) < 50);
+
+    // 1) boundary treelines: continuous groomed run edges, like a real hill
+    for (const side of [-1, 1]) {
+      let ts = 70 + rng() * 8;
+      while (ts < COURSE.length + 60) {
+        const wiggle = noise1(ts * 0.01 + side * 3.3, this.seed + 5) * 0.08;
+        const u = 0.94 + wiggle + rng() * 0.08;
+        addTree(this.centerAt(ts) + side * COURSE.halfWidth * u, ts, u < 1.0);
+        // staggered second row just outside thickens the edge
+        if (rng() < 0.65) {
+          addTree(this.centerAt(ts) + side * COURSE.halfWidth * (u + 0.1 + rng() * 0.1), ts + 3 + rng() * 4, false);
+        }
+        ts += 8 + rng() * 6;
+      }
     }
-    // sparse trees inside the run for slalom danger
-    for (let i = 0; i < 40; i++) {
-      const ts = 140 + rng() * (COURSE.length - 260);
-      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.2;
-      if (this.jumps.some((j) => Math.abs(j.s - ts) < 45)) continue;
-      if (nearBridge(ts)) continue;
+
+    // 2) glades: dense organized woods bulging into the run — pick a line
+    //    around them or thread the clearings
+    this.glades = [];
+    let gs = 220 + rng() * 200;
+    while (gs < COURSE.length - 260) {
+      if (!nearBridge(gs) && !nearJump(gs)) {
+        this.glades.push({
+          s0: gs,
+          s1: gs + 110 + rng() * 130,
+          side: rng() < 0.5 ? -1 : 1,
+          depth: 0.34 + rng() * 0.2,
+        });
+        gs += 340 + rng() * 300;
+      } else {
+        gs += 80;
+      }
+    }
+    for (const g of this.glades) {
+      for (let ts = g.s0; ts < g.s1; ts += 6.5) {
+        for (let r = 0; r < 4; r++) {
+          if (rng() < 0.22) continue; // clearings to thread
+          const u = 1.0 - g.depth * (r / 3) - rng() * 0.05;
+          addTree(
+            this.centerAt(ts) + g.side * COURSE.halfWidth * u + (rng() - 0.5) * 2.5,
+            ts + (rng() - 0.5) * 4,
+            u < 1.0
+          );
+        }
+      }
+    }
+
+    // 3) a few lone specimens inside the run — sparse, deliberate
+    for (let i = 0; i < 16; i++) {
+      const ts = 150 + rng() * (COURSE.length - 280);
+      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.1;
+      if (nearJump(ts) || nearBridge(ts)) continue;
       addTree(x, ts, true);
+    }
+
+    // 4) rockfall clusters at the wall bases + a handful of lone boulders
+    for (let ci = 0; ci < 4; ci++) {
+      const cs = 200 + rng() * (COURSE.length - 420);
+      if (nearBridge(cs) || nearJump(cs)) continue;
+      const side = rng() < 0.5 ? -1 : 1;
+      const cxr = this.centerAt(cs) + side * COURSE.halfWidth * (0.7 + rng() * 0.22);
+      const n = 4 + Math.floor(rng() * 5);
+      for (let i = 0; i < n; i++) {
+        addRock(cxr + (rng() - 0.5) * 11, cs + (rng() - 0.5) * 15, true);
+      }
+    }
+    for (let i = 0; i < 9; i++) {
+      const ts = 160 + rng() * (COURSE.length - 320);
+      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.4;
+      if (nearJump(ts) || nearBridge(ts)) continue;
+      addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
     }
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
     this._treeXf = treeXf;
@@ -239,25 +291,29 @@ export class Terrain {
   }
 
   _buildBridges(group) {
-    // glassy ice arches framing each underpass portal
-    const iceMat = new THREE.MeshLambertMaterial({ color: 0xa8d8ee, transparent: true, opacity: 0.88 });
+    // A vault of snow filling the ridge above each portal: outer surface
+    // rounds up to the ridge crest, inner surface is the arched tunnel
+    // ceiling. Snow-colored so it reads as part of the mountain, with the
+    // underside falling into natural blue shade from the hemisphere light.
+    const snowMat = new THREE.MeshLambertMaterial({ color: 0xecf3fa });
     for (const b of this.bridges) {
       const floorY = this.heightAt(b.gapX, -b.s);
-      for (const off of [-b.len * 0.32, b.len * 0.32]) {
-        const arch = new THREE.Mesh(new THREE.TorusGeometry(b.gapW / 2 + 0.6, 1.5, 8, 14, Math.PI), iceMat);
-        arch.position.set(b.gapX, floorY + 0.4, -(b.s + off));
-        group.add(arch);
-      }
-      // a lintel bar joining the two arches so the tunnel reads from above
-      const lintel = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.4, 1.4, b.len * 0.64, 8),
-        iceMat
-      );
-      lintel.rotation.x = Math.PI / 2;
-      lintel.position.set(b.gapX - b.gapW / 2 - 0.6, floorY + 2.2, -b.s);
-      const lintel2 = lintel.clone();
-      lintel2.position.x = b.gapX + b.gapW / 2 + 0.6;
-      group.add(lintel, lintel2);
+      const r1 = b.gapW / 2 + 0.4; // tunnel opening
+      const r2 = r1 + 4.2; // shoulders that bury into the ridge
+      const shape = new THREE.Shape();
+      shape.absarc(0, 0, r2, 0, Math.PI, false);
+      shape.lineTo(-r1, 0);
+      shape.absarc(0, 0, r1, Math.PI, 0, true);
+      shape.lineTo(r2, 0);
+      // short enough that both end caps stay buried where the ridge is tall
+      const depth = b.len * 0.66;
+      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 22 });
+      geo.applyMatrix4(new THREE.Matrix4().makeScale(1, (b.h + 1.7) / r2, 1));
+      const vault = new THREE.Mesh(geo, snowMat);
+      vault.position.set(b.gapX, floorY - 0.2, -b.s - depth / 2);
+      vault.castShadow = true;
+      vault.receiveShadow = true;
+      group.add(vault);
     }
   }
 
@@ -445,26 +501,11 @@ export class Terrain {
   }
 
   _buildGatesAndFinish(group) {
-    // 5 start gates on the apron
-    const gateMat = new THREE.MeshLambertMaterial({ color: 0x38414d });
-    const barMat = new THREE.MeshLambertMaterial({ color: 0xd6452f });
+    // lane positions only — the start structure itself is built by StartGate
     this.gateLanes = [];
     const c0 = this.centerAt(4);
     for (let i = 0; i < 5; i++) {
-      const gx = c0 + (i - 2) * 6.5;
-      const gz = -4;
-      const gy = this.heightAt(gx, gz);
-      this.gateLanes.push({ x: gx, z: gz });
-      const g = new THREE.Group();
-      for (const side of [-1, 1]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.5, 0.18), gateMat);
-        post.position.set(gx + side * 1.3, gy + 0.75, gz);
-        g.add(post);
-      }
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 0.1), barMat);
-      bar.position.set(gx, gy + 1.15, gz);
-      g.add(bar);
-      group.add(g);
+      this.gateLanes.push({ x: c0 + (i - 2) * 6.5, z: -4 });
     }
 
     // finish arch

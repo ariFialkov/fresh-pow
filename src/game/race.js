@@ -8,6 +8,7 @@ import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { SprayPool, GearTrails } from './snowfx.js';
+import { StartGate } from './startgate.js';
 import { mulberry32, smoothstep } from './rng.js';
 import { drawOutcome, multiplierFor } from './rtp.js';
 import { state, save } from './state.js';
@@ -41,6 +42,9 @@ export class RaceScene {
 
     this.hud = new RaceHud();
     this.fx = new SprayPool(this.scene);
+    this.pyro = new SprayPool(this.scene, 320, { color: [1, 0.7, 0.3], blending: THREE.AdditiveBlending, gravity: 5 });
+    this.gate = new StartGate(this.terrain);
+    this.scene.add(this.gate.group);
     this.player = new Player(this.terrain, opts.gear, input, this.hud);
     this.player.fx = this.fx;
     const playerLane = this.terrain.gateLanes[2];
@@ -108,9 +112,11 @@ export class RaceScene {
         this.stateName = 'racing';
         this.player.frozen = false;
         for (const b of this.bots) b.frozen = false;
+        this.gate.setPhase('go'); // lights green, bars fly, pyro + smoke
       } else if (n !== this._lastCount && n <= 3) {
         this._lastCount = n;
         this.hud.countdown(String(n));
+        if (n === 1) this.gate.setPhase('set');
       }
     }
 
@@ -159,6 +165,8 @@ export class RaceScene {
     });
 
     this.fx.update(dt);
+    this.pyro.update(dt);
+    this.gate.update(dt, this.time, this.fx, this.pyro);
     this.playerTrail.update(dt);
     for (const b of this.bots) b.trail.update(dt);
 

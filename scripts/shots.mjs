@@ -51,7 +51,7 @@ for (const [label, s] of [['mid', 700], ['jump', null], ['bridge', 'bridge'], ['
     return s;
   }, s);
   if (target === null) { console.log(`skip ${label} (none on this seed)`); continue; }
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(label === 'bridge' ? 1400 : 2500);
   await page.screenshot({ path: `scratch-${label}.png` });
   console.log(`shot ${label} at s=${target}`);
 }

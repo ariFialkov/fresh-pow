@@ -6,6 +6,8 @@ import { Terrain } from './terrain.js';
 import { createRider, setPose } from './riderMesh.js';
 import { MenuHud } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
+import { SprayPool } from './snowfx.js';
+import { StartGate } from './startgate.js';
 import { mulberry32 } from './rng.js';
 import { pickBots } from './names.js';
 import { EQUIPMENT } from './equipment.js';
@@ -42,6 +44,9 @@ export class MenuScene {
     const gate = this.terrain.gateLanes[2];
     aimSun(this.sun, new THREE.Vector3(gate.x, this.terrain.heightAt(gate.x, gate.z), gate.z));
     this.snow = new Snowfall(this.scene, 350);
+    this.gate = new StartGate(this.terrain);
+    this.scene.add(this.gate.group);
+    this.fx = new SprayPool(this.scene, 220); // ambient smoke-machine wisps
 
     // lane 2 (center) is the player's; bots take the rest
     const roster = rosterFor(seed);
@@ -130,14 +135,16 @@ export class MenuScene {
     const lane = this.terrain.gateLanes[2];
     const gy = this.terrain.heightAt(lane.x, lane.z);
     const a = this.t * 0.07;
-    const cx = lane.x + Math.sin(a) * 8;
-    const cz = lane.z - 11 - Math.cos(a * 0.6) * 2; // in front of (below) the gates
+    const cx = lane.x + Math.sin(a) * 13;
+    const cz = lane.z - 26 - Math.cos(a * 0.6) * 3; // well below the gates
     const groundAtCam = this.terrain.heightAt(cx, cz);
-    const cy = Math.max(gy + 1.7 + Math.sin(this.t * 0.18) * 0.4, groundAtCam + 1.8);
+    const cy = Math.max(gy + 2.6 + Math.sin(this.t * 0.18) * 0.5, groundAtCam + 2.0);
     this.camera.position.set(cx, cy, cz);
-    // aim just above the gate line so the riders stand against the sky
-    this.camera.lookAt(lane.x, gy + 2.0, lane.z);
+    // frame riders, lane gates AND the truss structure above them
+    this.camera.lookAt(lane.x, gy + 3.6, lane.z);
 
+    this.gate.update(dt, this.t, this.fx, null);
+    this.fx.update(dt);
     this.snow.update(dt, this.camera.position);
   }
 
