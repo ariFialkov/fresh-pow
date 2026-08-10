@@ -346,7 +346,7 @@ export function createRider(gear, helmetColor) {
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
-    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0 },
+    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0, twist: 0, curl: 0 },
   };
   setPose(rider, { idle: true, t: 0, dt: 1 }); // dt=1 converges the damping instantly
   return rider;
@@ -376,8 +376,12 @@ export function setPose(rider, p = {}) {
   S.crouch = ease(S.crouch, p.crouch ?? 0, 10);
   S.air = ease(S.air, p.airborne ? 1 : 0, 6);
   S.shift = ease(S.shift, p.shift ?? 0, 4.5); // fore/aft weight over the deck
+  S.twist = ease(S.twist, p.twist ?? 0, 8); // spin rate while tricking
+  S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
+  const twist = S.twist;
+  const curl = S.curl;
   const brake = S.brakeIn;
   const airborne = !!p.airborne;
   const idle = !!p.idle;
@@ -419,7 +423,7 @@ export function setPose(rider, p = {}) {
   // imperfection: nobody holds a pose perfectly — tiny asymmetric sway
   if (rider._nph === undefined) rider._nph = Math.random() * 20;
   const ph = rider._nph;
-  const busy = idle ? 0.25 : 0.5 + speed * 0.8;
+  const busy = idle ? 0.25 : 0.5 + speed * 0.8 + air * 1.2;
   const swayA = (Math.sin(t * 1.13 + ph) + 0.6 * Math.sin(t * 2.71 + ph * 2)) * 0.035 * busy;
   const swayB = (Math.sin(t * 0.97 + ph * 3) + 0.5 * Math.sin(t * 2.23 + ph)) * 0.03 * busy;
 
@@ -454,15 +458,15 @@ export function setPose(rider, p = {}) {
     RX(parts.neck, -(spx + 0.1) * 0.7 + longG * 0.25, 7, 0.5);
     RZ(parts.neck, steer * 0.22 + swayA * 0.8, 7, 0.5);
     for (const leg of parts.legs) {
-      RX(leg.hip, -1.5 + breathe * 0.02);
-      RX(leg.knee, 0.95);
-      RX(leg.ankle, 0.6);
+      RX(leg.hip, 1.5 + breathe * 0.02);
+      RX(leg.knee, -0.95);
+      RX(leg.ankle, -0.6);
       RY(leg.ankle, 0);
     }
     for (const arm of parts.arms) {
       RX(arm.shoulder, -0.85 + brake * 0.55 + air * -0.5 + wobA + longG * -0.45 + swayA * arm.side + knocked * 0.8, 8, 0.5);
       RZ(arm.shoulder, arm.side * (-0.18 + jolt * 0.5 + knocked * 0.9), 8, 0.5);
-      RX(arm.elbow, -0.5 - brake * 0.5, 9, 0.55);
+      RX(arm.elbow, 0.5 + brake * 0.5, 9, 0.55);
       RX(arm.wrist, -0.3, 7, 0.45);
     }
     return;
@@ -473,13 +477,13 @@ export function setPose(rider, p = {}) {
   const kneeGround = idle
     ? 0.18 + breathe * 0.03
     : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
-  const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2) * air;
+  const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2 + curl * 0.55 + Math.abs(twist) * 0.3) * air;
 
   // per-leg chain angles; board legs split fore/aft to reach the bindings
   let legVSum = 0;
   const legAngles = [];
   for (const leg of parts.legs) {
-    const split = isBoard ? (leg.index === 0 ? -0.42 : 0.36) : 0;
+    const split = isBoard ? (leg.index === 0 ? 0.42 : -0.36) : 0;
     const stag = !isBoard ? (leg.index === 0 ? 1 : -1) * pump * 0.5 : 0;
     const a = kneeBend * 0.8 + split * 0.5 + stag; // thigh from vertical
     const b = kneeBend * 1.65 + Math.abs(split) * 0.4 + stag * 0.4; // knee fold
@@ -497,25 +501,25 @@ export function setPose(rider, p = {}) {
   const spineGround = idle
     ? 0.05 + breathe * 0.015
     : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5 + shift * 0.22;
-  const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2) * air;
+  const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
   RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 + swayB * 0.4, 9, 0.65);
   RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
-  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18, 9, 0.65);
+  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18 + twist * 0.35 * air, 9, 0.65);
   RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22, 8.5, 0.6);
   RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
-  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14, 8.5, 0.6);
+  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14 + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
   RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 + longG * 0.3, 6.5, 0.48);
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
-  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2, 6.5, 0.48);
+  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
 
   for (const [i, leg] of parts.legs.entries()) {
     const { a, b } = legAngles[i];
-    RX(leg.hip, -a, 14, 0.9);
-    RX(leg.knee, b, 14, 0.9);
-    RX(leg.ankle, a - b, 16, 0.95); // levels the boot on the deck
+    RX(leg.hip, a, 14, 0.9);
+    RX(leg.knee, -b, 14, 0.9);
+    RX(leg.ankle, b - a, 16, 0.95); // levels the boot on the deck
     // boots stay bound to the deck line whatever the hips do
     RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y, 16, 0.95);
   }
@@ -524,26 +528,29 @@ export function setPose(rider, p = {}) {
   for (const arm of parts.arms) {
     let sx, sz, ex, wx;
     if (knocked > 0.3) {
-      sx = -1.2 + wobA; sz = arm.side * 1.2; ex = -0.4; wx = 0;
+      sx = -1.2 + wobA; sz = arm.side * 1.2; ex = 0.4; wx = 0;
     } else if (idle) {
-      sx = 0.12; sz = arm.side * 0.16; ex = -0.35; wx = -0.15;
+      sx = 0.12; sz = arm.side * 0.16; ex = 0.35; wx = -0.15;
     } else if (isBoard) {
       // balance arms: relaxed droop, trailing arm rises with edge angle
       sx = 0.2 + wobA + bk * -0.3;
       sz = arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45;
-      ex = -0.55;
+      ex = 0.55;
       wx = arm.side * steer * 0.2;
     } else {
       sx = 0.55 + tuck * 0.65 + bk * -0.35 + wobA;
       sz = arm.side * (0.32 - tuck * 0.18 + bk * 0.5);
-      ex = -1.05 - tuck * 0.55;
+      ex = 1.05 + tuck * 0.55;
       wx = 0.35 + tuck * 0.25 - bk * 0.5;
     }
-    // airborne arms spread for balance, mixed in continuously
+    // airborne arms: spread for balance, pull IN as the spin winds up
+    // (skater physics), and the leading arm reaches down into flips (grab)
     if (!idle && knocked <= 0.3) {
-      sx = sx * (1 - air) + (-0.5 + wobA) * air;
-      sz = sz * (1 - air) + arm.side * (1.15 + stumble * 0.4) * air;
-      ex = ex * (1 - air) + -0.5 * air;
+      const spread = 1.15 - Math.abs(twist) * 0.8 + stumble * 0.4;
+      const grab = arm.side < 0 ? curl * 0.9 : curl * 0.25;
+      sx = sx * (1 - air) + (-0.5 + wobA + grab + Math.abs(twist) * 0.3) * air;
+      sz = sz * (1 - air) + arm.side * spread * air;
+      ex = ex * (1 - air) + (0.55 + grab * 0.5) * air;
       wx = wx * (1 - air) + -0.2 * air;
     }
     // arms are loose masses: they trail the body and swing through stops

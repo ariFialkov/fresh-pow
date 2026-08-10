@@ -206,8 +206,14 @@ export class Player {
 
       // animate tricks toward their targets
       const spinRate = 6.2, flipRate = 5.4;
+      const prevSpin = this.spinDone, prevFlip = this.flipDone;
       this.spinDone = approach(this.spinDone, this.trickSpin, spinRate * dt);
       this.flipDone = approach(this.flipDone, this.trickFlip, flipRate * dt);
+      // rotation rates drive the body: wind into spins, curl into flips
+      if (dt > 0) {
+        this.twist = lerp(this.twist ?? 0, clamp((this.spinDone - prevSpin) / dt / 7, -1, 1), clamp(dt * 9, 0, 1));
+        this.curl = lerp(this.curl ?? 0, clamp(Math.abs(this.flipDone - prevFlip) / dt / 6, 0, 1), clamp(dt * 9, 0, 1));
+      }
 
       if (ny <= ground) {
         // ---- landing ----
@@ -272,6 +278,10 @@ export class Player {
     // legs work the terrain like suspension: rough snow = constant absorption
     const bumpTarget = this.airborne ? 0 : clamp(Math.abs(this.groundVy) * 0.045, 0, 0.4);
     this.bump = lerp(this.bump, bumpTarget, clamp(dt * 5, 0, 1));
+    if (!this.airborne) {
+      this.twist = lerp(this.twist ?? 0, 0, clamp(dt * 10, 0, 1));
+      this.curl = lerp(this.curl ?? 0, 0, clamp(dt * 10, 0, 1));
+    }
 
     // longitudinal G: the body gets thrown forward under braking and pressed
     // back under acceleration — the pose springs react to this
@@ -293,6 +303,8 @@ export class Player {
       speedNorm: clamp(this.speed / 42, 0, 1),
       longG: clamp(this.longA / 11, -1, 1),
       jolt: this.bump * 1.3,
+      twist: this.twist ?? 0,
+      curl: this.curl ?? 0,
       t: this.t,
       dt,
     });
