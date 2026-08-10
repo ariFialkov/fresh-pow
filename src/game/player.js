@@ -353,8 +353,9 @@ export class Player {
   _sync(dt) {
     const t = this.terrain;
     this.obj.position.copy(this.pos);
-    // riding IN the snow, not on it: settle slightly into the surface
-    if (!this.airborne) this.obj.position.y -= 0.05 + Math.min(0.04, this.speed * 0.001);
+    // ride ON the rendered surface: the mesh interpolates above the analytic
+    // height between samples, so lift slightly to keep gear visible
+    if (!this.airborne) this.obj.position.y += 0.09;
     this.obj.rotation.y = -this.yaw;
 
     // align to slope when grounded, trick rotations when flying

@@ -251,13 +251,13 @@ export class Trail {
       const d = Math.hypot(dx, dz) || 1;
       const nx = -dz / d;
       const nz = dx / d;
-      const y = this.terrain.heightAt(p.x, p.z) + 0.05;
+      const y = this.terrain.heightAt(p.x, p.z) + 0.24;
       const w = this.width;
       pos[v * 6] = p.x + nx * w;
       pos[v * 6 + 1] = y;
       pos[v * 6 + 2] = p.z + nz * w;
       pos[v * 6 + 3] = p.x - nx * w;
-      pos[v * 6 + 4] = this.terrain.heightAt(p.x - nx * w, p.z - nz * w) + 0.05;
+      pos[v * 6 + 4] = this.terrain.heightAt(p.x - nx * w, p.z - nz * w) + 0.24;
       pos[v * 6 + 5] = p.z - nz * w;
       this.terrain.normalAt(p.x, p.z, n3);
       c.copy(this.trackCol).lerp(this.snowCol, Math.min(1, p.age / this.fadeTime));

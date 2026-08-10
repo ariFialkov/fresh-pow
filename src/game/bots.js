@@ -203,7 +203,7 @@ export class Bot {
     this._wasAirborne = airborne;
 
     this.obj.position.set(x, this.y, z);
-    if (!airborne) this.obj.position.y -= 0.06;
+    if (!airborne) this.obj.position.y += 0.09;
 
     // the tip leads: heading looks further down the line than the travel
     // direction, so the board visibly initiates each carve
