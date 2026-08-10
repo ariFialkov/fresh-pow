@@ -167,7 +167,7 @@ export class GearTrails {
 
 /** A carved line pressed into the snow behind one rider. */
 export class Trail {
-  constructor(scene, terrain, width = 0.34, max = 90) {
+  constructor(scene, terrain, width = 0.34, max = 230) {
     this.terrain = terrain;
     this.width = width;
     this.max = max;
@@ -203,9 +203,9 @@ export class Trail {
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
 
-    this.trackCol = new THREE.Color(0xa9c2dc); // pressed snow, slightly blue
+    this.trackCol = new THREE.Color(0x93aecd); // pressed snow, deeper groove
     this.snowCol = new THREE.Color(0xf2f7fd);
-    this.fadeTime = 9;
+    this.fadeTime = 15; // tracks linger well behind the pack
     this.minDist = 0.9; // dense sampling keeps thin lines smooth through carves
   }
 

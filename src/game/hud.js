@@ -256,9 +256,16 @@ export function showEventRoller(events, chosen, onDone) {
   const detail = el.querySelector('#ev-detail');
   const card = el.querySelector('.ev-card');
 
+  // venue action shots as card art; preload so the reel never flickers blank
+  for (const ev of events) {
+    const img = new Image();
+    img.src = `events/${ev.id}.jpg`;
+  }
   const renderTicket = (ev) => `
-    <div class="ev-flag">${ev.flag}</div>
-    <div class="ev-name">${ev.name}</div>
+    <div class="ev-shot" style="background-image:url('events/${ev.id}.jpg')">
+      <div class="ev-shot-fade"></div>
+      <div class="ev-name">${ev.name}</div>
+    </div>
     <div class="ev-place">${ev.place}</div>
     <div class="ev-top">TOP PRIZE <b>&times;${topPrize(ev)}</b></div>`;
 

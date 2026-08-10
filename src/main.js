@@ -34,9 +34,12 @@ function toMenu() {
 }
 
 /** Draw tonight's event, run the slot-machine reveal, then drop in. */
+const urlq = new URLSearchParams(location.search);
 function rollThenRace(opts) {
-  const event = EVENTS[Math.floor(Math.random() * EVENTS.length)];
-  showEventRoller(EVENTS, event, () => startRace({ ...opts, event }));
+  const forced = EVENTS.find((e) => e.id === urlq.get('event'));
+  const event = forced ?? EVENTS[Math.floor(Math.random() * EVENTS.length)];
+  if (forced) startRace({ ...opts, event }); // dev/photo mode skips the roller
+  else showEventRoller(EVENTS, event, () => startRace({ ...opts, event }));
 }
 
 function startRace(opts) {

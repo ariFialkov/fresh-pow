@@ -15,6 +15,12 @@ export const COURSE = {
 
 const GRADE = 0.5; // average downhill grade
 
+// deterministic per-vertex jitter for craggy rock silhouettes
+function hashJitter(a, b, c) {
+  const n = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453;
+  return (n - Math.floor(n)) - 0.5;
+}
+
 export class Terrain {
   constructor(seed, theme = THEMES.utah) {
     this.seed = seed >>> 0;
@@ -211,7 +217,14 @@ export class Terrain {
     const u = (x - c) / COURSE.halfWidth;
     h += 5 * u * u;
     const au = Math.abs(u);
-    if (au > 0.85) h += 55 * (au - 0.85) * (au - 0.85);
+    if (au > 0.85) {
+      // saturating rise: steep flanks near the run easing into broad high
+      // ridges — mountain shoulders, not a slot canyon
+      const w = au - 0.85;
+      h += 130 * (1 - Math.exp(-w * w * 0.5));
+      // large-scale ridge noise gives the walls real crestlines and cols
+      h += fbm2(x * 0.006, su * 0.006, this.seed + 91, 3) * 42 * smoothstep(0.95, 1.9, au);
+    }
 
     // start apron: keep the gate area clean
     const rough = smoothstep(25, 90, s);
@@ -352,11 +365,13 @@ export class Terrain {
     // Non-uniform grid: fine cells in the riding corridor, coarse on the
     // valley walls. Normals come analytically from heightAt so strip seams
     // are invisible.
-    const FINE = 1.7, COARSE = 6.0, CORRIDOR = 74;
+    const FINE = 1.7, COARSE = 6.0, CORRIDOR = 74, OUTER = 235, OSTEP = 13;
     const xs = [];
+    for (let x = -OUTER; x < -COURSE.meshHalfWidth; x += OSTEP) xs.push(x);
     for (let x = -COURSE.meshHalfWidth; x < -CORRIDOR; x += COARSE) xs.push(x);
     for (let x = -CORRIDOR; x <= CORRIDOR; x += FINE) xs.push(x);
     for (let x = CORRIDOR + COARSE; x <= COURSE.meshHalfWidth; x += COARSE) xs.push(x);
+    for (let x = COURSE.meshHalfWidth + OSTEP; x <= OUTER; x += OSTEP) xs.push(x);
 
     const stripLen = 102;
     const rows = Math.round(stripLen / FINE);
@@ -439,19 +454,39 @@ export class Terrain {
 
   _buildInstances(group) {
     // trees: trunk + two foliage cones merged per-instance via two instanced meshes
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1.4, 6);
-    trunkGeo.translate(0, 0.7, 0);
-    // layered spruce: two cones + a snow-dusted cap
-    const lower = new THREE.ConeGeometry(1.6, 3.0, 8);
-    lower.translate(0, 2.4, 0);
-    const upper = new THREE.ConeGeometry(1.1, 2.6, 8);
-    upper.translate(0, 3.9, 0);
-    const foliageGeo = mergeGeometries([lower, upper]);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1.5, 7);
+    trunkGeo.translate(0, 0.75, 0);
+    // three-tier spruce with snow-dusted shoulders on every tier
+    const tiers = [
+      [1.75, 2.6, 1.9],
+      [1.3, 2.3, 3.3],
+      [0.85, 2.1, 4.6],
+    ];
+    const foliageGeo = mergeGeometries(
+      tiers.map(([r, h, y]) => {
+        const g = new THREE.ConeGeometry(r, h, 9);
+        g.translate(0, y, 0);
+        return g;
+      })
+    );
+    const snowGeo = mergeGeometries(
+      [
+        [1.15, 0.55, 3.0],
+        [0.78, 0.5, 4.35],
+        [0.42, 0.9, 5.35],
+      ].map(([r, h, y]) => {
+        const g = new THREE.ConeGeometry(r, h, 9);
+        g.translate(0, y, 0);
+        return g;
+      })
+    );
     const trunkMat = new THREE.MeshLambertMaterial({ color: this.theme.trunk });
     const foliageMat = new THREE.MeshLambertMaterial({ color: this.theme.foliage });
+    const snowCapMat = new THREE.MeshLambertMaterial({ color: 0xf4f8fd });
     const nTrees = this._treeXf.length;
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, nTrees);
     const foliage = new THREE.InstancedMesh(foliageGeo, foliageMat, nTrees);
+    const treeSnow = new THREE.InstancedMesh(snowGeo, snowCapMat, nTrees);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
@@ -463,23 +498,43 @@ export class Terrain {
       m.compose(new THREE.Vector3(t.x, y, t.z), q, sc);
       trunks.setMatrixAt(i, m);
       foliage.setMatrixAt(i, m);
+      treeSnow.setMatrixAt(i, m);
     });
     trunks.castShadow = foliage.castShadow = true;
-    group.add(trunks, foliage);
+    group.add(trunks, foliage, treeSnow);
 
+    // craggy boulders: jittered icosahedron + a settled snow cap on top
     const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
+    {
+      const pos = rockGeo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const jx = hashJitter(pos.getX(i), pos.getY(i), pos.getZ(i));
+        pos.setXYZ(
+          i,
+          pos.getX(i) * (1 + jx * 0.22),
+          pos.getY(i) * (1 + hashJitter(pos.getY(i), pos.getZ(i), pos.getX(i)) * 0.18),
+          pos.getZ(i) * (1 + hashJitter(pos.getZ(i), pos.getX(i), pos.getY(i)) * 0.22)
+        );
+      }
+      rockGeo.computeVertexNormals();
+    }
     rockGeo.translate(0, 0.55, 0);
+    const rockSnowGeo = new THREE.IcosahedronGeometry(0.92, 1);
+    rockSnowGeo.scale(1, 0.32, 1);
+    rockSnowGeo.translate(0, 1.18, 0);
     const rockMat = new THREE.MeshLambertMaterial({ color: this.theme.rock, flatShading: true });
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, this._rockXf.length);
+    const rockSnow = new THREE.InstancedMesh(rockSnowGeo, snowCapMat, this._rockXf.length);
     this._rockXf.forEach((r, i) => {
       const y = this.heightAt(r.x, r.z) - 0.35;
       q.setFromAxisAngle(up, r.rot);
       sc.set(r.sc, r.sc * (0.7 + (i % 3) * 0.2), r.sc);
       m.compose(new THREE.Vector3(r.x, y, r.z), q, sc);
       rocks.setMatrixAt(i, m);
+      rockSnow.setMatrixAt(i, m);
     });
     rocks.castShadow = true;
-    group.add(rocks);
+    group.add(rocks, rockSnow);
 
     // course flags every ~90 m marking the line
     const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 4);
