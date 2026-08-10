@@ -2,7 +2,7 @@
 // mounted into the fixed #ui layer.
 import { EQUIPMENT, TYPE_LABEL } from './equipment.js';
 import { BET_CHIPS, state } from './state.js';
-import { PAYTABLE } from './rtp.js';
+import { topPrize } from './rtp.js';
 
 const ui = () => document.getElementById('ui');
 
@@ -45,8 +45,7 @@ export class MenuHud {
         <div class="panel bet-row" id="bet-row"><span class="lbl">Bet</span></div>
         <button id="start-btn" disabled>Waiting&hellip;</button>
         <div class="panel paytable-hint">
-          ${PAYTABLE.map((r) => `${r.pos}${['st', 'nd', 'rd', 'th', 'th'][r.pos - 1]} <b>&times;${r.mult}</b>`).join(' &nbsp;&middot;&nbsp; ')}
-          &nbsp;&middot;&nbsp; 96% RTP
+          The event draw sets the prize table &mdash; top prizes up to <b>&times;12</b> &nbsp;&middot;&nbsp; 96% RTP
         </div>
       </div>`;
     ui().appendChild(el);
@@ -236,15 +235,77 @@ export class RaceHud {
   }
 }
 
+// -------------------------------------------------------- event roller ----
+
+/**
+ * Slot-machine draw for tonight's event: cycles venue cards fast, decelerates
+ * over ~2 s, locks onto the chosen event with its prize table, then continues.
+ */
+export function showEventRoller(events, chosen, onDone) {
+  const el = document.createElement('div');
+  el.id = 'event-roller';
+  el.innerHTML = `
+    <div class="ev-card${topPrize(chosen) >= 6 ? ' ev-hype' : ''}">
+      <div class="ev-kicker">Tonight's Event</div>
+      <div class="ev-window" id="ev-window"></div>
+      <div class="ev-detail" id="ev-detail"></div>
+    </div>`;
+  ui().appendChild(el);
+
+  const win = el.querySelector('#ev-window');
+  const detail = el.querySelector('#ev-detail');
+  const card = el.querySelector('.ev-card');
+
+  const renderTicket = (ev) => `
+    <div class="ev-flag">${ev.flag}</div>
+    <div class="ev-name">${ev.name}</div>
+    <div class="ev-place">${ev.place}</div>
+    <div class="ev-top">TOP PRIZE <b>&times;${topPrize(ev)}</b></div>`;
+
+  // spin: ease out from 70 ms ticks to a stop on the chosen event
+  const reel = [...events].sort(() => Math.random() - 0.5);
+  let i = 0;
+  let delay = 70;
+  const spin = () => {
+    win.innerHTML = renderTicket(reel[i % reel.length]);
+    i++;
+    delay *= 1.16;
+    if (delay < 330) {
+      setTimeout(spin, delay);
+    } else {
+      // lock it in
+      win.innerHTML = renderTicket(chosen);
+      card.classList.add('ev-locked');
+      detail.innerHTML = `
+        <div class="ev-tag">${chosen.tag}</div>
+        <div class="ev-table">
+          ${chosen.table
+            .map((r) => `<span class="ev-cell"><i>${r.pos}${['st', 'nd', 'rd', 'th', 'th'][r.pos - 1]}</i><b>&times;${r.mult}</b></span>`)
+            .join('')}
+        </div>`;
+      setTimeout(() => {
+        el.classList.add('ev-out');
+        setTimeout(() => {
+          el.remove();
+          onDone();
+        }, 450);
+      }, 2100);
+    }
+  };
+  spin();
+  return el;
+}
+
 // ------------------------------------------------------------- results ----
-export function showResults({ standings, playerPos, bet, payout, style, onAgain, onLodge }) {
+export function showResults({ event, standings, playerPos, bet, payout, style, onAgain, onLodge }) {
   const el = document.createElement('div');
   el.id = 'results';
   const sfx = ['st', 'nd', 'rd', 'th', 'th'][playerPos - 1];
   const net = payout - bet;
   el.innerHTML = `
     <div class="panel results-card">
-      <h2>Race Complete</h2>
+      <h2>${event ? `${event.flag} ${event.name}` : 'Race Complete'}</h2>
+      ${event ? `<div class="ev-place-line">${event.place}</div>` : ''}
       <div class="big-pos${playerPos <= 2 ? ' win' : ''}">${playerPos}${sfx}</div>
       <div class="payout-line${net < 0 ? ' loss' : ''}">
         Bet ${fmt(bet)} &rarr; paid <b>${fmt(payout)}</b> chips

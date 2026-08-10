@@ -10,7 +10,8 @@ import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { SprayPool, GearTrails } from './snowfx.js';
 import { StartGate } from './startgate.js';
 import { mulberry32, smoothstep } from './rng.js';
-import { drawOutcome, multiplierFor } from './rtp.js';
+import { drawOutcome, multiplierFor, EVENTS } from './rtp.js';
+import { THEMES } from './themes.js';
 import { state, save } from './state.js';
 
 export class RaceScene {
@@ -22,21 +23,23 @@ export class RaceScene {
   constructor(opts, input, cb) {
     this.cb = cb;
     this.input = input;
+    this.event = opts.event ?? EVENTS[2];
+    const theme = THEMES[this.event.theme];
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0xdcefff, 180, 950);
+    this.scene.fog = new THREE.Fog(theme.fog, theme.fogNear * 0.8, theme.fogFar * 0.85);
     this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 4000);
 
-    this.terrain = new Terrain(opts.seed);
+    this.terrain = new Terrain(opts.seed, theme);
     const tg = new THREE.Group();
     this.terrain.build(tg);
     this.scene.add(tg);
-    this.scene.add(makeSky());
-    this.sun = addLights(this.scene).sun;
+    this.scene.add(makeSky(theme));
+    this.sun = addLights(this.scene, theme).sun;
     this.snow = new Snowfall(this.scene);
 
     // ---- the draw: outcome decided here, before anyone moves ----
     const raceRng = mulberry32(opts.seed ^ 0xbe77e7);
-    this.outcome = drawOutcome(raceRng, opts.bet);
+    this.outcome = drawOutcome(raceRng, opts.bet, this.event.table);
     state.balance = Math.round((state.balance - opts.bet) * 100) / 100;
     save();
 
@@ -288,13 +291,14 @@ export class RaceScene {
 
     // full standings from the draw
     const rows = [
-      { pos: playerPos, name: 'You', color: 0xfbbf24, me: true, mult: multiplierFor(playerPos) },
+      { pos: playerPos, name: 'You', color: 0xfbbf24, me: true, mult: multiplierFor(playerPos, this.event.table) },
       ...this.bots.map((b) => ({ pos: b.rank, name: b.identity.name, color: b.identity.color, me: false })),
     ].sort((a, b) => a.pos - b.pos);
 
     if (this._resultsShown) return;
     this._resultsShown = true;
     showResults({
+      event: this.event,
       standings: rows,
       playerPos,
       bet,

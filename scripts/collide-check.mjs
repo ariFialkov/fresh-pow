@@ -35,8 +35,11 @@ const putBotOnPlayer = (mode) => page.evaluate((m) => {
   const race = window.__fp.race;
   const bot = race.bots.find((b) => b.ahead);
   bot.d = -race.player.pos.z;
-  // put the PLAYER on the bot's natural line — no push offset to decay away
-  race.player.pos.x = bot.lineAt(bot.d);
+  // put the PLAYER exactly where the bot will RENDER: its gate lane blended
+  // onto its line over the first 85 m (same math as Bot.update)
+  let u = Math.min(1, Math.max(0, (bot.d - 6) / 79));
+  u = u * u * (3 - 2 * u);
+  race.player.pos.x = bot.lane.x + (bot.lineAt(bot.d) - bot.lane.x) * u;
   bot._pushX = 0;
   bot._aggroBlend = 0;
   bot._collideCd = 0;

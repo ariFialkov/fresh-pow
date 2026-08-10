@@ -6,6 +6,8 @@ import { RaceScene } from './game/race.js';
 import { randomSeed } from './game/rng.js';
 import { needsTopUp, topUp, state } from './game/state.js';
 import { Quality } from './game/world.js';
+import { EVENTS } from './game/rtp.js';
+import { showEventRoller } from './game/hud.js';
 
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -28,7 +30,13 @@ function setScene(scene) {
 function toMenu() {
   if (needsTopUp()) topUp(); // the lodge comps broke players back in — virtual chips only
   const seed = randomSeed();
-  setScene(new MenuScene(seed, (opts) => startRace(opts)));
+  setScene(new MenuScene(seed, (opts) => rollThenRace(opts)));
+}
+
+/** Draw tonight's event, run the slot-machine reveal, then drop in. */
+function rollThenRace(opts) {
+  const event = EVENTS[Math.floor(Math.random() * EVENTS.length)];
+  showEventRoller(EVENTS, event, () => startRace({ ...opts, event }));
 }
 
 function startRace(opts) {
@@ -36,10 +44,10 @@ function startRace(opts) {
     new RaceScene(opts, input, {
       onExit: (next) => {
         if (next === 'again' && state.balance >= opts.bet) {
-          // quick re-race: same bet and gear, fresh mountain and roster
+          // quick re-race: same bet and gear, fresh mountain, roster and event
           if (needsTopUp()) topUp();
           const seed = randomSeed();
-          startRace({ seed, bet: opts.bet, gear: opts.gear, bots: rosterFor(seed) });
+          rollThenRace({ seed, bet: opts.bet, gear: opts.gear, bots: rosterFor(seed) });
         } else {
           toMenu();
         }

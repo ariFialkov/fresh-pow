@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
+import { THEMES } from './themes.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -15,8 +16,9 @@ export const COURSE = {
 const GRADE = 0.5; // average downhill grade
 
 export class Terrain {
-  constructor(seed) {
+  constructor(seed, theme = THEMES.utah) {
     this.seed = seed >>> 0;
+    this.theme = theme;
     const rng = mulberry32(this.seed);
     this.ph = Array.from({ length: 8 }, () => rng() * Math.PI * 2);
 
@@ -33,7 +35,7 @@ export class Terrain {
     while (s < COURSE.length - 300) {
       // keep cliffs clear of kickers
       if (!this.jumps.some((j) => Math.abs(j.s - s) < 60)) {
-        this.drops.push({ s, h: 4 + rng() * 6 });
+        this.drops.push({ s, h: (4 + rng() * 6) * theme.cliffMul });
       }
       s += 380 + rng() * 260;
     }
@@ -41,7 +43,7 @@ export class Terrain {
     // one mega cliff for the drama
     const megaS = 700 + rng() * 600;
     if (!this.jumps.some((j) => Math.abs(j.s - megaS) < 80)) {
-      this.drops.push({ s: megaS, h: 12 + rng() * 5 });
+      this.drops.push({ s: megaS, h: (12 + rng() * 5) * Math.max(0.7, theme.cliffMul) });
     }
 
     this.crevices = [];
@@ -106,6 +108,8 @@ export class Terrain {
     const nearJump = (ts) => this.jumps.some((j) => Math.abs(j.s - ts) < 50);
 
     // 1) boundary treelines: continuous groomed run edges, like a real hill
+    const treeMul = theme.treeMul;
+    const edgeStep = clamp(11 / Math.max(0.05, treeMul), 6, 200);
     for (const side of [-1, 1]) {
       let ts = 70 + rng() * 8;
       while (ts < COURSE.length + 60) {
@@ -116,14 +120,14 @@ export class Terrain {
         if (rng() < 0.65) {
           addTree(this.centerAt(ts) + side * COURSE.halfWidth * (u + 0.1 + rng() * 0.1), ts + 3 + rng() * 4, false);
         }
-        ts += 8 + rng() * 6;
+        ts += edgeStep * (0.7 + rng() * 0.6);
       }
     }
 
     // 2) glades: dense organized woods bulging into the run — pick a line
     //    around them or thread the clearings
     this.glades = [];
-    let gs = 220 + rng() * 200;
+    let gs = treeMul < 0.3 ? COURSE.length : 220 + rng() * 200; // treeless venues skip glades
     while (gs < COURSE.length - 260) {
       if (!nearBridge(gs) && !nearJump(gs)) {
         this.glades.push({
@@ -152,7 +156,8 @@ export class Terrain {
     }
 
     // 3) slalom hazards inside the run — enough to keep the open snow honest
-    for (let i = 0; i < 34; i++) {
+    const loneTrees = Math.round(34 * clamp(treeMul, 0.1, 1.2));
+    for (let i = 0; i < loneTrees; i++) {
       const ts = 150 + rng() * (COURSE.length - 280);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.1;
       if (nearJump(ts) || nearBridge(ts)) continue;
@@ -160,7 +165,8 @@ export class Terrain {
     }
 
     // 4) rockfall clusters at the wall bases + a handful of lone boulders
-    for (let ci = 0; ci < 4; ci++) {
+    const clusters = clamp(Math.round(4 * theme.rockMul), 2, 8);
+    for (let ci = 0; ci < clusters; ci++) {
       const cs = 200 + rng() * (COURSE.length - 420);
       if (nearBridge(cs) || nearJump(cs)) continue;
       const side = rng() < 0.5 ? -1 : 1;
@@ -170,7 +176,8 @@ export class Terrain {
         addRock(cxr + (rng() - 0.5) * 11, cs + (rng() - 0.5) * 15, true);
       }
     }
-    for (let i = 0; i < 26; i++) {
+    const loneRocks = clamp(Math.round(26 * theme.rockMul), 8, 55);
+    for (let i = 0; i < loneRocks; i++) {
       const ts = 160 + rng() * (COURSE.length - 320);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.4;
       if (nearJump(ts) || nearBridge(ts)) continue;
@@ -210,10 +217,10 @@ export class Terrain {
     const rough = smoothstep(25, 90, s);
 
     // big rolls and ridge lines
-    h += 5.5 * fbm2(x * 0.017, s * 0.017, this.seed, 3) * rough;
+    h += 5.5 * this.theme.roughMul * fbm2(x * 0.017, s * 0.017, this.seed, 3) * rough;
     // mogul fields come and go in zones
     const mogul = smoothstep(0.25, 0.75, noise1(s * 0.004 + 7.7, this.seed) * 0.5 + 0.5);
-    h += 1.3 * fbm2(x * 0.085, s * 0.085, this.seed + 31, 2) * mogul * rough;
+    h += 1.3 * this.theme.mogulMul * fbm2(x * 0.085, s * 0.085, this.seed + 31, 2) * mogul * rough;
 
     // kicker jumps: ramp up then the ground falls away
     for (const j of this.jumps) {
@@ -353,9 +360,9 @@ export class Terrain {
 
     const stripLen = 102;
     const rows = Math.round(stripLen / FINE);
-    const colSnow = new THREE.Color(0xf2f7fd);
-    const colIce = new THREE.Color(0xa8cdea);
-    const colRock = new THREE.Color(0x7d8590);
+    const colSnow = new THREE.Color(this.theme.snow);
+    const colIce = new THREE.Color(this.theme.ice);
+    const colRock = new THREE.Color(this.theme.rock);
     const tmp = new THREE.Color();
 
     for (let s0 = -60; s0 < COURSE.length + 180; s0 += stripLen) {
@@ -440,8 +447,8 @@ export class Terrain {
     const upper = new THREE.ConeGeometry(1.1, 2.6, 8);
     upper.translate(0, 3.9, 0);
     const foliageGeo = mergeGeometries([lower, upper]);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a4630 });
-    const foliageMat = new THREE.MeshLambertMaterial({ color: 0x2e5d46 });
+    const trunkMat = new THREE.MeshLambertMaterial({ color: this.theme.trunk });
+    const foliageMat = new THREE.MeshLambertMaterial({ color: this.theme.foliage });
     const nTrees = this._treeXf.length;
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, nTrees);
     const foliage = new THREE.InstancedMesh(foliageGeo, foliageMat, nTrees);
@@ -462,7 +469,7 @@ export class Terrain {
 
     const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
     rockGeo.translate(0, 0.55, 0);
-    const rockMat = new THREE.MeshLambertMaterial({ color: 0x8b93a1, flatShading: true });
+    const rockMat = new THREE.MeshLambertMaterial({ color: this.theme.rock, flatShading: true });
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, this._rockXf.length);
     this._rockXf.forEach((r, i) => {
       const y = this.heightAt(r.x, r.z) - 0.35;

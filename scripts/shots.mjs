@@ -10,7 +10,7 @@ page.on('pageerror', (e) => console.error('pageerror:', e));
 await page.goto('http://localhost:4176/');
 await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
 await page.click('#start-btn');
-await page.waitForFunction(() => !!window.__fp, { timeout: 5000 });
+await page.waitForFunction(() => !!window.__fp?.race, undefined, { timeout: 40000 });
 // countdown runs on game time, which is slower than wall time headless
 await page.waitForFunction(() => window.__fp.race.stateName === 'racing', undefined, { timeout: 120000 });
 await page.keyboard.down('w');

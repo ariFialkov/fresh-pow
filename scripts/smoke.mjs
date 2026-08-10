@@ -32,7 +32,7 @@ await page.click('.chip'); // pick first bet chip
 if (shots) await page.screenshot({ path: 'scratch-menu.png' });
 
 await page.click('#start-btn');
-await page.waitForSelector('#race-ui', { timeout: 5000 });
+await page.waitForSelector('#race-ui', { timeout: 40000 });
 console.log('race scene mounted');
 
 // countdown runs on game time, which crawls under software rendering

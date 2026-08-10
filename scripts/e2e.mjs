@@ -18,7 +18,7 @@ await page.waitForFunction(() => { const b = document.querySelector('#start-btn'
 
 const balanceBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance ?? 1000);
 await page.click('#start-btn');
-await page.waitForFunction(() => !!window.__fp, { timeout: 5000 });
+await page.waitForFunction(() => !!window.__fp?.race, undefined, { timeout: 40000 });
 
 const outcome = await page.evaluate(() => window.__fp.race.outcome);
 console.log('drawn outcome:', JSON.stringify(outcome));

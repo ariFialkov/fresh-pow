@@ -1,15 +1,16 @@
 // Shared scene dressing: sky dome, lighting, fog, drifting snow.
 import * as THREE from 'three';
+import { THEMES } from './themes.js';
 
-export function makeSky() {
+export function makeSky(theme = THEMES.utah) {
   const geo = new THREE.SphereGeometry(2600, 16, 10);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new THREE.Color(0x4b8fd4) },
-      bottom: { value: new THREE.Color(0xdcefff) },
+      top: { value: new THREE.Color(theme.skyTop) },
+      bottom: { value: new THREE.Color(theme.skyBottom) },
     },
     vertexShader: `
       varying vec3 vDir;
@@ -32,11 +33,11 @@ export function makeSky() {
 // Global render quality knobs (main.js turns shadows off on weak devices)
 export const Quality = { shadows: true };
 
-export function addLights(scene) {
+export function addLights(scene, theme = THEMES.utah) {
   // dimmer ambient + stronger warm sun = deeper shading on riders and moguls
-  const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x8e99ab, 0.85);
+  const hemi = new THREE.HemisphereLight(theme.hemiSky, theme.hemiGround, theme.hemiI);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff0d0, 1.9);
+  const sun = new THREE.DirectionalLight(theme.sunCol, theme.sunI);
   sun.position.set(75, 85, 35);
   scene.add(sun);
   scene.add(sun.target);
