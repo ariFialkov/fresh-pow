@@ -59,9 +59,10 @@ export class MenuScene {
     this.playerRider = null;
     this._placePlayer(EQUIPMENT.find((e) => e.id === state.gearId) || EQUIPMENT[0]);
 
-    // bots join over the first seconds
+    // bots pile into the lobby fast — every seat filled within ~2 seconds,
+    // each on its own independently random clock so the order feels organic
     this.joinQueue = this.botIdentities.map((b, i) => ({
-      at: 1.2 + i * (1.0 + rng() * 2.2),
+      at: 0.25 + rng() * 1.65,
       identity: b,
       gear: this.botGear[i],
       lane: this.botLanes[i],

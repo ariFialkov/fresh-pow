@@ -183,6 +183,9 @@ export class Bot {
     this._pushX *= Math.max(0, 1 - dt * 2.2);
     let x = this.lineAt(this.d) + this._pushX;
     if (this._aggroBlend > 0.01) x = lerp(x, race.player.pos.x, this._aggroBlend * 0.9);
+    // off the start, hold the gate lane and merge onto the racing line
+    // gradually — no sideways bunching into the neighbors' gates
+    x = lerp(this.lane.x, x, smoothstep(6, 85, this.d));
     const z = -this.d;
     const ground = this.terrain.heightAt(x, z);
     if (ground <= this.y) {

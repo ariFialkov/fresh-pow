@@ -151,8 +151,8 @@ export class Terrain {
       }
     }
 
-    // 3) a few lone specimens inside the run — sparse, deliberate
-    for (let i = 0; i < 16; i++) {
+    // 3) slalom hazards inside the run — enough to keep the open snow honest
+    for (let i = 0; i < 34; i++) {
       const ts = 150 + rng() * (COURSE.length - 280);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.1;
       if (nearJump(ts) || nearBridge(ts)) continue;
@@ -170,7 +170,7 @@ export class Terrain {
         addRock(cxr + (rng() - 0.5) * 11, cs + (rng() - 0.5) * 15, true);
       }
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 26; i++) {
       const ts = 160 + rng() * (COURSE.length - 320);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.4;
       if (nearJump(ts) || nearBridge(ts)) continue;

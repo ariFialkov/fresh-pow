@@ -89,6 +89,13 @@ export class RaceScene {
     this._camPos = new THREE.Vector3().copy(this.camera.position);
     this._resultsShown = false;
 
+    // finish-line pyro: fires when the first rider crosses
+    const fcx = this.terrain.centerAt(COURSE.length);
+    this._finishPorts = [-15, 15].map(
+      (off) => new THREE.Vector3(fcx + off, this.terrain.heightAt(fcx + off, -COURSE.length) + 9.8, -COURSE.length)
+    );
+    this._finishPyroT = -1;
+
     // prime the camera behind the player
     this._updateCamera(1, true);
 
@@ -98,6 +105,11 @@ export class RaceScene {
 
   onBotFinish(bot) {
     this.finishOrder.push({ name: bot.identity.name, color: bot.identity.color, me: false });
+    this._firstCross();
+  }
+
+  _firstCross() {
+    if (this._finishPyroT < 0) this._finishPyroT = 0;
   }
 
   update(dt) {
@@ -145,6 +157,7 @@ export class RaceScene {
       if (!this.player.finished && this.player.progress >= COURSE.length) {
         this.player.finished = true;
         this.finishOrder.push({ name: 'You', color: 0xfbbf24, me: true });
+        this._firstCross();
         this.stateName = 'done';
         this._finish();
       }
@@ -166,7 +179,22 @@ export class RaceScene {
 
     this.fx.update(dt);
     this.pyro.update(dt);
-    this.gate.update(dt, this.time, this.fx, this.pyro);
+    this.gate.update(dt, this.time, this.fx, null); // pyro lives at the finish now
+
+    // finish-line show: big opening salvo, then crackle for ~2 s
+    if (this._finishPyroT >= 0 && this._finishPyroT < 2.0) {
+      if (this._finishPyroT === 0) {
+        for (const port of this._finishPorts) {
+          this.pyro.burst(port, { x: 0, z: 0 }, { count: 30, speed: 6, up: 13, spread: Math.PI, size: 1.5, life: 1.2 });
+        }
+      }
+      for (const port of this._finishPorts) {
+        if (Math.random() < dt * 11) {
+          this.pyro.burst(port, { x: 0, z: 0 }, { count: 9, speed: 4, up: 10 + Math.random() * 7, spread: Math.PI, size: 1.3, life: 1.0 });
+        }
+      }
+      this._finishPyroT += dt;
+    }
     this.playerTrail.update(dt);
     for (const b of this.bots) b.trail.update(dt);
 
