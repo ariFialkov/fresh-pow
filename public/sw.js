@@ -1,6 +1,6 @@
 /* Fresh Pow service worker — precache the shell, runtime-cache hashed assets. */
-const CACHE = 'freshpow-v1';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'freshpow-v2';
+const SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
