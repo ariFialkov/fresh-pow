@@ -86,15 +86,15 @@ function buildGear(gear) {
       g.add(base, ski, tip, binding);
     }
   } else if (gear.type === 'board') {
-    const base = mesh(capsule('boardbase', 0.168, 1.32), baseMat);
+    const base = mesh(capsule('boardbase', 0.205, 1.32), baseMat);
     base.rotation.x = Math.PI / 2;
-    base.scale.set(1, 1, 0.1);
+    base.scale.set(1, 1, 0.085);
     base.position.y = 0.02;
-    const deck = mesh(capsule('board', 0.155, 1.3), deckMat);
+    const deck = mesh(capsule('board', 0.19, 1.3), deckMat);
     deck.rotation.x = Math.PI / 2;
-    deck.scale.set(1, 1, 0.14);
+    deck.scale.set(1, 1, 0.115);
     deck.position.y = 0.035;
-    const stripe = mesh(capsule('bstripe', 0.1, 1.14), accentMat);
+    const stripe = mesh(capsule('bstripe', 0.125, 1.14), accentMat);
     stripe.rotation.x = Math.PI / 2;
     stripe.scale.set(1, 1, 0.12);
     stripe.position.y = 0.048;
@@ -102,7 +102,7 @@ function buildGear(gear) {
     // bindings sit where the pose actually plants the boots (measured), with
     // the same duck angles the ankle comp applies: front open, back near flat
     for (const [z, rot] of [[-0.35, 0.28], [0.35, -0.08]]) {
-      const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.14, 0.05, 0.33)), darkMat);
+      const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.17, 0.05, 0.33)), darkMat);
       b.position.set(0, 0.065, z);
       b.rotation.y = rot;
       g.add(b);
@@ -498,7 +498,7 @@ export function setPose(rider, p = {}) {
   // ---- standing riders (ski / board) ----
   // ground and air stances blend continuously through S.air
   const kneeGround = idle
-    ? (isBoard ? 0.34 : 0.18) + breathe * 0.03
+    ? (isBoard ? 0.22 : 0.18) + breathe * 0.03
     : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
   const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2 + curl * 0.55 + Math.abs(twist) * 0.3) * air;
 
