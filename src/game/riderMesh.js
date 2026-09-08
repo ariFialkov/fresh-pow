@@ -445,8 +445,15 @@ export function setPose(rider, p = {}) {
   RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
-    // skis/board pivot across the slope to scrub speed
-    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) - steer * 0.12, 12, 0.8);
+    // skis pivot across the slope to scrub; the board instead noses INTO the
+    // turn slightly ahead of the body, so the deck reads as leading the carve
+    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) + steer * (isBoard ? 0.16 : -0.12), 12, 0.8);
+    if (isBoard) {
+      // the rig roll above banks the whole prefab — including the deck, which
+      // looked fake. Counter-roll the board so it glides flat on the snow,
+      // keeping only a slight edge tilt into the carve.
+      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) - swayB * 0.3, 7, 0.6);
+    }
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
   }
@@ -524,7 +531,7 @@ export function setPose(rider, p = {}) {
   // tucks, never as a resting crouch; airborne legs stay floaty, not balled.
   const kneeGround = idle
     ? (isBoard ? 0.2 : 0.14) + breathe * 0.03
-    : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * 0.5 + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
+    : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.2 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
   const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25) * air;
 
   // per-leg chain angles. The board pelvis rides yawed nearly across the
@@ -555,22 +562,30 @@ export function setPose(rider, p = {}) {
   // toward the fall line (that laid-back backside look); ski hips swing
   // gently into every turn.
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8)
-    + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck);
+    + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
+    + (isBoard ? -0.5 * tuck : 0); // a tucked boarder squares up toward travel to fold low over the nose
   RY(parts.pelvis, pelvisYaw, 7, 0.7);
+  // aero tuck hinges at the hips, not just the spine — the butt drops back
+  // while the torso folds flat; the legs below compensate so the feet stay
+  const pelvisPitch = isBoard ? tuck * 0.5 * (1 - knocked) : 0;
+  RX(parts.pelvis, pelvisPitch, 9, 0.7);
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : (isBoard ? 0.14 : 0.06) + tuck * 0.45 - brake * 0.22 + knocked * 0.5 + shift * 0.22
-      + (isBoard ? Math.min(0, steer) * 0.25 : 0); // heelside: lean back casual
+    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.9 : 0.45) - brake * 0.22 + knocked * 0.5 + shift * 0.22
+      + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside: lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
-  RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 + swayB * 0.4, 9, 0.65);
+  // acceleration G presses the body upright/back — but a tucked rider is
+  // braced hard forward, so the tuck largely overrides that press
+  const gBrace = 1 - tuck * 0.8;
+  RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 * gBrace + swayB * 0.4, 9, 0.65);
   RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
   RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
-  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22, 8.5, 0.6);
+  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
   RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
   RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
@@ -580,7 +595,9 @@ export function setPose(rider, p = {}) {
 
   for (const [i, leg] of parts.legs.entries()) {
     const { a, b, ab } = legAngles[i];
-    RX(leg.hip, a, 14, 0.9);
+    // thigh target is a world angle; subtract the pelvis hinge so the hip
+    // fold doesn't swing the legs (and feet) backwards with it
+    RX(leg.hip, a - pelvisPitch, 14, 0.9);
     RZ(leg.hip, ab, 14, 0.9);
     RX(leg.knee, -b, 14, 0.9);
     RX(leg.ankle, b - a, 16, 0.95); // levels the boot on the deck
