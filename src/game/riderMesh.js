@@ -215,6 +215,27 @@ export function createRider(gear, helmetColor) {
     addJoint('foot' + s, char.sided.feet[s], restWorld(char.sided.feet[s]));
   }
 
+  // ---- leg IK rest data: standing riders pin their ankles to fixed
+  // binding anchors on the gear (no foot wiggle), so the legs are solved
+  // as a two-bone chain instead of driven by open-loop angles ----
+  char.root.updateWorldMatrix(true, true);
+  ctl.ik = {};
+  for (const s of [-1, 1]) {
+    const U = char.sided.upLegs[s], L = char.sided.legs[s], F = char.sided.feet[s];
+    const up = U.getWorldPosition(new THREE.Vector3());
+    const lp = L.getWorldPosition(new THREE.Vector3());
+    const fp = F.getWorldPosition(new THREE.Vector3());
+    ctl.ik[s] = {
+      upleg: U, leg: L, foot: F,
+      L1: up.distanceTo(lp), L2: lp.distanceTo(fp),
+      uplegRestQ: U.getWorldQuaternion(new THREE.Quaternion()),
+      legRestQ: L.getWorldQuaternion(new THREE.Quaternion()),
+      footRestQ: F.getWorldQuaternion(new THREE.Quaternion()),
+      dirThighRest: lp.clone().sub(up).normalize(),
+      dirCalfRest: fp.clone().sub(lp).normalize(),
+    };
+  }
+
   // hips crouch/shift offsets convert into the hips-parent frame
   const hp = B.Hips.parent;
   const hpQ = new THREE.Quaternion();
@@ -275,8 +296,22 @@ export function createRider(gear, helmetColor) {
   shadow.rotation.x = -Math.PI / 2;
   root.add(shadow);
 
+  // fixed ankle anchors in gearGroup-local space — the bindings. Feet stay
+  // exactly here, always (IK solves the legs down to them).
+  const footAnchors = isSled
+    ? null
+    : isBoard
+      ? {
+          1: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: 0.28 }, // front foot, ducked open
+          [-1]: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -0.08 }, // back foot, near flat
+        }
+      : {
+          1: { pos: new THREE.Vector3(0.175, 0.2, 0.03), yaw: 0 },
+          [-1]: { pos: new THREE.Vector3(-0.175, 0.2, 0.03), yaw: 0 },
+        };
+
   const rider = {
-    root, rig, gearGroup, parts, shadow, char, ctl,
+    root, rig, gearGroup, parts, shadow, char, ctl, footAnchors,
     isSled, isBoard, type: gear.type,
     isSaucer: gear.id === 'sled-saucer',
     // sideways stance: the feet straddle line sits perpendicular to the
@@ -297,6 +332,34 @@ export function createRider(gear, helmetColor) {
 const STAND_Y = 1.0; // the pose solver's standing pelvis height (meters)
 const _aq = new THREE.Quaternion();
 const _av = new THREE.Vector3();
+// IK scratch
+const _tW = new THREE.Vector3();
+const _hipW = new THREE.Vector3();
+const _v1 = new THREE.Vector3();
+const _kf = new THREE.Vector3();
+const _n = new THREE.Vector3();
+const _bx = new THREE.Vector3();
+const _by = new THREE.Vector3();
+const _bz = new THREE.Vector3();
+const _m1 = new THREE.Matrix4();
+const _m2 = new THREE.Matrix4();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
+const _rigQ = new THREE.Quaternion();
+const _kneeW = new THREE.Vector3();
+const _calfDir = new THREE.Vector3();
+const _legQ = new THREE.Quaternion();
+const _RIG_X = new THREE.Vector3(-1, 0, 0); // rig lateral axis in model space
+const _UP = new THREE.Vector3(0, 1, 0);
+
+// Orthonormal frame (X ~ bend axis, Y = bone direction) -> quaternion.
+function frameQuat(out, x, y) {
+  _bz.crossVectors(x, y).normalize();
+  _bx.crossVectors(y, _bz).normalize();
+  _m1.makeBasis(_bx, y, _bz);
+  return out.setFromRotationMatrix(_m1);
+}
 
 function setJoint(ctl, key, rx, ry, rz) {
   const j = ctl.joints[key];
@@ -336,11 +399,86 @@ function applySkeleton(rider) {
     setJoint(ctl, 'fore' + s, arm.elbow.rotation.x, 0, 0);
     setJoint(ctl, 'hand' + s, arm.wrist.rotation.x, 0, 0);
   }
-  for (const leg of P.legs) {
-    const s = leg.side;
-    setJoint(ctl, 'upleg' + s, leg.hip.rotation.x, leg.hip.rotation.y, leg.hip.rotation.z);
-    setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
-    setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, leg.ankle.rotation.z);
+  if (rider.footAnchors) {
+    const gg = rider.gearGroup;
+    rider.rig.updateWorldMatrix(true, false);
+    rider.rig.getWorldQuaternion(_rigQ);
+
+    // ---- aero-tuck fold, in WORLD frame: rotate hips + spine chain about
+    // the rig's lateral axis so the fold always aims down the hill, no
+    // matter how far the pelvis is yawed. Local-axis pitch can't do this —
+    // the spine's pitch axis turns with the hips. The neck/head get a
+    // counter-share so the rider keeps looking down the line. ----
+    const fold = rider.rigFold ?? 0;
+    if (fold > 0.002) {
+      _kf.set(-1, 0, 0).applyQuaternion(_rigQ); // world-space rig lateral axis
+      const b = rider.char.bones;
+      for (const [bone, share] of [
+        [ctl.joints.hips.bone, 0.42],
+        [b.Spine, 0.16], [b.Spine01, 0.16], [b.Spine02, 0.16],
+        [b.neck, -0.42], [b.Head, -0.3],
+      ]) {
+        if (!bone) continue;
+        bone.parent.getWorldQuaternion(_q1);
+        _q2.setFromAxisAngle(_kf, fold * share);
+        bone.quaternion.premultiply(_q3.copy(_q1).invert().multiply(_q2).multiply(_q1));
+      }
+    }
+
+    // ---- standing riders: two-bone leg IK pins each ankle to its binding
+    // anchor on the gear — the feet never wiggle, whatever the body does ----
+    // knees aim between the board nose and the hips' facing
+    const kneeYaw = (P.pelvis.rotation.y || 0) * 0.55 + gg.rotation.y * 0.45;
+    for (const s of [-1, 1]) {
+      const ik = ctl.ik[s];
+      const anchor = rider.footAnchors[s];
+      // anchor -> world through the gear's live transform
+      _tW.copy(anchor.pos).applyQuaternion(gg.quaternion).add(gg.position);
+      rider.rig.localToWorld(_tW);
+      ik.upleg.getWorldPosition(_hipW); // fresh: climbs the just-posed hips
+      _v1.subVectors(_tW, _hipW);
+      const reach = ik.L1 + ik.L2;
+      const d = Math.min(Math.max(_v1.length(), reach * 0.3), reach * 0.995);
+      _v1.normalize();
+      // bend plane: knees kick forward of the chain
+      _kf.set(Math.sin(kneeYaw), 0, -Math.cos(kneeYaw)).applyQuaternion(_rigQ);
+      _n.crossVectors(_kf, _v1);
+      if (_n.lengthSq() < 1e-6) _n.set(-1, 0, 0).applyQuaternion(_rigQ);
+      _n.normalize();
+      const alpha = Math.acos(Math.min(1, Math.max(-1, (ik.L1 * ik.L1 + d * d - ik.L2 * ik.L2) / (2 * ik.L1 * d))));
+      const thighDir = _v1.applyAxisAngle(_n, -alpha); // aliases _v1
+      // world orientation: rotate the bone's rest pose by the world-space
+      // delta between its rest chain frame and the solved chain frame (the
+      // rig rotation cancels through the rest frame, so none leads here)
+      frameQuat(_q1, _n, thighDir);
+      _by.copy(ik.dirThighRest).applyQuaternion(_rigQ);
+      _bx.copy(_RIG_X).applyQuaternion(_rigQ);
+      frameQuat(_q2, _bx, _by);
+      const uplegW = _q3.copy(_q1).multiply(_q2.invert()).multiply(_rigQ).multiply(ik.uplegRestQ);
+      ik.upleg.parent.getWorldQuaternion(_q1);
+      ik.upleg.quaternion.copy(_q1.invert()).multiply(uplegW);
+      // calf: from the solved knee point down to the anchor
+      _kneeW.copy(_hipW).addScaledVector(thighDir, ik.L1);
+      _calfDir.subVectors(_tW, _kneeW).normalize();
+      frameQuat(_q1, _n, _calfDir);
+      _by.copy(ik.dirCalfRest).applyQuaternion(_rigQ);
+      _bx.copy(_RIG_X).applyQuaternion(_rigQ);
+      frameQuat(_q2, _bx, _by);
+      const legW = _legQ.copy(_q1).multiply(_q2.invert()).multiply(_rigQ).multiply(ik.legRestQ);
+      ik.leg.quaternion.copy(_q1.copy(uplegW).invert()).multiply(legW);
+      // boot: flat on the deck, turned to its binding angle, riding the
+      // gear's own tilt — fully independent of what the legs are doing
+      _q1.setFromAxisAngle(_UP, anchor.yaw);
+      const footW = _q2.copy(_rigQ).multiply(gg.quaternion).multiply(_q1).multiply(ik.footRestQ);
+      ik.foot.quaternion.copy(_q1.copy(legW).invert()).multiply(footW);
+    }
+  } else {
+    for (const leg of P.legs) {
+      const s = leg.side;
+      setJoint(ctl, 'upleg' + s, leg.hip.rotation.x, leg.hip.rotation.y, leg.hip.rotation.z);
+      setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
+      setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, leg.ankle.rotation.z);
+    }
   }
 
   // trailing-hand world position while the mitt is brushing the snow
@@ -534,29 +672,16 @@ export function setPose(rider, p = {}) {
     : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.2 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
   const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25) * air;
 
-  // per-leg chain angles. The board pelvis rides yawed nearly across the
-  // deck, so its feet straddle the board line by thigh ab/adduction in the
-  // pelvis frame; ski legs stay square and only stagger with the skate pump.
-  let legVSum = 0;
-  const legAngles = [];
-  for (const leg of parts.legs) {
-    // the yawed pelvis already fore/afts the wide hip sockets; abduction
-    // widens that split along the board rather than fighting it
-    const ab = isBoard ? leg.side * 0.32 : 0;
-    const stag = !isBoard ? (leg.index === 0 ? 1 : -1) * pump * 0.5 : 0;
-    const a = kneeBend * 0.8 + stag; // thigh from vertical
-    const b = kneeBend * 1.65 + Math.abs(ab) * 0.35 + stag * 0.4; // knee fold
-    legAngles.push({ a, b, ab });
-    legVSum += (THIGH_L * Math.cos(a) + CALF_L * Math.cos(b - a)) * Math.cos(ab * 0.8);
-  }
+  // the legs are IK-solved to the binding anchors (applySkeleton); the pose
+  // only decides how LOW the pelvis rides, which is what sets the knee bend
+  const a = kneeBend * 0.8;
+  const b = kneeBend * 1.65;
+  const legVSum = 2 * (THIGH_L * Math.cos(a) + CALF_L * Math.cos(b - a));
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
   PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.03 : 0) - air * 0.12 - knocked * 0.35);
-  // center of gravity slides fore/aft over the deck with the weight shift;
-  // the yawed board pelvis also re-centers laterally so the feet straddle
-  // lands on the deck line (the leg fold drifts the feet sideways with yaw)
+  // center of gravity slides fore/aft over the deck with the weight shift
   PZ(parts.pelvis, -shift * 0.11);
-  PX(parts.pelvis, isBoard ? -0.19 : 0);
   // hips flow with the turn on a lazy spring — the twist "catches up" the
   // torso rather than snapping with it. Board heelside carves open the hips
   // toward the fall line (that laid-back backside look); ski hips swing
@@ -565,14 +690,15 @@ export function setPose(rider, p = {}) {
     + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
     + (isBoard ? -0.5 * tuck : 0); // a tucked boarder squares up toward travel to fold low over the nose
   RY(parts.pelvis, pelvisYaw, 7, 0.7);
-  // aero tuck hinges at the hips, not just the spine — the butt drops back
-  // while the torso folds flat; the legs below compensate so the feet stay
-  const pelvisPitch = isBoard ? tuck * 0.5 * (1 - knocked) : 0;
-  RX(parts.pelvis, pelvisPitch, 9, 0.7);
+  // aero tuck: the fold happens in applySkeleton as a WORLD-frame rotation
+  // about the rig's lateral axis (hips + spine chain), because the spine
+  // bones hang under the yawed pelvis and any local-axis pitch would bend
+  // the sideways board rider toward his hips' facing instead of downhill
+  rider.rigFold = isBoard ? tuck * 1.5 * (1 - knocked) : 0;
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.9 : 0.45) - brake * 0.22 + knocked * 0.5 + shift * 0.22
+    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.15 : 0.45) - brake * 0.22 + knocked * 0.5 + shift * 0.22
       + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside: lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
@@ -585,7 +711,7 @@ export function setPose(rider, p = {}) {
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
   RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
-  RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
+  RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0.1 : 0.35) + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
   RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
   RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
@@ -593,22 +719,8 @@ export function setPose(rider, p = {}) {
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
   RY(parts.neck, -pelvisYaw * (isBoard ? 0.72 : 0.45) - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
 
-  for (const [i, leg] of parts.legs.entries()) {
-    const { a, b, ab } = legAngles[i];
-    // thigh target is a world angle; subtract the pelvis hinge so the hip
-    // fold doesn't swing the legs (and feet) backwards with it
-    RX(leg.hip, a - pelvisPitch, 14, 0.9);
-    RZ(leg.hip, ab, 14, 0.9);
-    RX(leg.knee, -b, 14, 0.9);
-    RX(leg.ankle, b - a, 16, 0.95); // levels the boot on the deck
-    RZ(leg.ankle, -ab, 16, 0.95); // and counter-rolls it flat under the straddle
-    // boots stay bound to the deck line whatever the hips do; board boots
-    // pick up duck-ish binding angles (front foot open, back foot near zero)
-    const bindAngle = isBoard ? (leg.index === 0 ? 0.28 : -0.08) : 0;
-    // same spring as the pelvis yaw so the boots don't twist while the
-    // hips lazily catch up through a turn
-    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y + bindAngle, 7, 0.7);
-  }
+  // (legs: nothing to drive here — applySkeleton IK-solves them down to the
+  // binding anchors from the pelvis the springs above just placed)
 
   // ---- pole plants: entering a carve, the inside arm punches forward and
   // stabs the pole, then recovers. Detected off the lean crossing into a
