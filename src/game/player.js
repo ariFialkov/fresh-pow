@@ -5,9 +5,9 @@ import * as THREE from 'three';
 import { createRider, setPose } from './riderMesh.js';
 import { clamp, lerp } from './rng.js';
 
-const G = 12.5; // arcade gravity along the slope
-const AIR_G = 18;
-const DRAG_K = 0.0046; // terminal ~ sqrt(G*grade/K) — deep snow, not boilerplate ice
+const G = 8; // arcade gravity along the slope — deep snow eats the pull
+const AIR_G = 15;
+const DRAG_K = 0.0095; // terminal ~ sqrt(G*grade/K) — roughly half the old pace
 const TUCK_DRAG = 0.55;
 const BRAKE_DECEL = 14;
 const MAX_YAW = 1.15; // radians away from straight downhill
@@ -130,11 +130,13 @@ export class Player {
     } else {
       // the edge takes a beat to bite before the gear comes around
       this.edge = lerp(this.edge, clamp(steerIn, -1, 1), clamp(dt * 2.4, 0, 1));
-      const carveRate = this.edge * (1.0 + 1.1 * clamp(this.speed / 32, 0, 1.15));
+      // turn rate scaled to the slower snow: full edge at cruise draws a
+      // long ~15-20m arc instead of a twitchy pivot
+      const carveRate = this.edge * (0.55 + 0.75 * clamp(this.speed / 24, 0, 1.2));
       this.yaw += carveRate * dt;
       // gravity pulls the line back to the fall line — gently mid-carve,
       // firmly once the edge is released
-      const centering = Math.abs(steerIn) < 0.12 ? 1.15 : 0.25;
+      const centering = Math.abs(steerIn) < 0.12 ? 0.9 : 0.2;
       this.yaw = lerp(this.yaw, 0, clamp(dt * centering, 0, 1));
       this.yaw = clamp(this.yaw, -MAX_YAW, MAX_YAW);
     }
@@ -353,7 +355,7 @@ export class Player {
       knocked,
       airborne: this.airborne,
       crouch: clamp(this.landComp + this.bump, 0, 1),
-      speedNorm: clamp(this.speed / 42, 0, 1),
+      speedNorm: clamp(this.speed / 26, 0, 1),
       longG: clamp(this.longA / 11, -1, 1),
       jolt: this.bump * 1.3,
       twist: this.twist ?? 0,

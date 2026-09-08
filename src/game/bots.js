@@ -230,11 +230,11 @@ export class Bot {
     } else {
       setPose(this.rider, {
         steer: lean,
-        tuck: this.speed > 34 && this.knockT <= 0 ? 1 : 0,
+        tuck: this.speed > 21 && this.knockT <= 0 ? 1 : 0,
         stumble: this.stumbleT > 0 ? 1 : 0,
         knocked,
         airborne,
-        speedNorm: clamp(this.speed / 42, 0, 1),
+        speedNorm: clamp(this.speed / 26, 0, 1),
         longG: clamp((this._longA ?? 0) / 11, -1, 1),
         t: this._t + this.weavePhase,
         dt,
