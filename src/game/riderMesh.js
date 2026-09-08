@@ -583,8 +583,8 @@ export function setPose(rider, p = {}) {
   // check, no steer = either at random.
   if ((p.brake ?? 0) > 0 && !rider._wasBraking) {
     const rnd = Math.random() < 0.5 ? -1 : 1;
-    rider._brakeSide = Math.abs(steer) > 0.05 ? (steer < 0 ? -1 : 1) : rnd;
-    rider._edgeLean = Math.abs(steer) > 0.05 ? (steer < 0 ? -1 : 1) : rnd;
+    rider._brakeSide = Math.abs(steer) > 0.05 ? (steer < 0 ? 1 : -1) : rnd;
+    rider._edgeLean = Math.abs(steer) > 0.05 ? (steer < 0 ? 1 : -1) : rnd;
   }
   rider._wasBraking = (p.brake ?? 0) > 0;
   const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 6);
