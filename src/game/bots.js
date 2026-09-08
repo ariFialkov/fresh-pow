@@ -244,7 +244,7 @@ export class Bot {
     // powder off the carves (cheaper budget than the player's spray)
     if (race.fx && !airborne && this.speed > 10) {
       const edge = Math.abs(lean);
-      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.05 * dt * 60;
+      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.07 * dt * 60;
       const side = Math.sign(lean) || 1;
       while (this._sprayAcc >= 1) {
         this._sprayAcc -= 1;
@@ -253,7 +253,7 @@ export class Bot {
           side * (1 + edge * 3.5) + (Math.random() - 0.5) * 2,
           1 + edge * 2 + Math.random() * 1.2,
           2 + (Math.random() - 0.5) * 2,
-          0.6 + edge * 0.5,
+          0.4 + edge * 0.35,
           0.45 + Math.random() * 0.35
         );
       }

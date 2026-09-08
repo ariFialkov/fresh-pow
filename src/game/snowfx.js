@@ -2,19 +2,31 @@
 // speed wake) and carved trails left in the snow behind every rider.
 import * as THREE from 'three';
 
-// soft round sprite generated once at runtime — no asset download
+// clumpy powder sprite generated once at runtime — a cluster of soft lobes
+// instead of one perfect circle, so overlapping particles read as a fine
+// granular cloud rather than round cotton puffs
 let spriteTex = null;
 function getSprite() {
   if (spriteTex) return spriteTex;
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = 96;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.55)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
+  const lobes = [
+    [48, 48, 34, 0.55],
+    [36, 40, 20, 0.4],
+    [60, 42, 18, 0.42],
+    [44, 60, 22, 0.38],
+    [58, 58, 15, 0.35],
+    [38, 55, 12, 0.3],
+  ];
+  for (const [x, y, r, a] of lobes) {
+    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${a})`);
+    g.addColorStop(0.55, `rgba(255,255,255,${a * 0.45})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 96, 96);
+  }
   spriteTex = new THREE.CanvasTexture(c);
   return spriteTex;
 }
@@ -36,11 +48,15 @@ export class SprayPool {
 
     this.aSize = new THREE.BufferAttribute(new Float32Array(max), 1);
     this.aAlpha = new THREE.BufferAttribute(new Float32Array(max), 1);
+    // per-particle brightness: darker grains deep in the cloud, bright ones
+    // catching the light — this variation is what sells "powder" over "puff"
+    this.aShade = new THREE.BufferAttribute(new Float32Array(max).fill(1), 1);
     const geo = new THREE.BufferGeometry();
     this.aPos = new THREE.BufferAttribute(this.pos, 3);
     geo.setAttribute('position', this.aPos);
     geo.setAttribute('aSize', this.aSize);
     geo.setAttribute('aAlpha', this.aAlpha);
+    geo.setAttribute('aShade', this.aShade);
 
     const mtl = new THREE.ShaderMaterial({
       transparent: true,
@@ -51,18 +67,20 @@ export class SprayPool {
         uColor: { value: new THREE.Vector3(...(opts.color ?? [0.97, 0.99, 1.0])) },
       },
       vertexShader: `
-        attribute float aSize; attribute float aAlpha; varying float vA;
+        attribute float aSize; attribute float aAlpha; attribute float aShade;
+        varying float vA; varying float vS;
         void main() {
           vA = aAlpha;
+          vS = aShade;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_PointSize = aSize * (240.0 / max(1.0, -mv.z));
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        uniform sampler2D uTex; uniform vec3 uColor; varying float vA;
+        uniform sampler2D uTex; uniform vec3 uColor; varying float vA; varying float vS;
         void main() {
           vec4 c = texture2D(uTex, gl_PointCoord);
-          gl_FragColor = vec4(uColor, c.a * vA);
+          gl_FragColor = vec4(uColor * vS, c.a * vA);
         }`,
     });
     this.points = new THREE.Points(geo, mtl);
@@ -82,6 +100,7 @@ export class SprayPool {
     this.age[i] = 0;
     this.life[i] = life;
     this.size0[i] = size;
+    this.aShade.array[i] = 0.85 + Math.random() * 0.22;
   }
 
   /** Fan of powder kicked from a point. dir = horizontal throw direction. */
@@ -123,12 +142,16 @@ export class SprayPool {
       pos[i * 3] += vel[i * 3] * dt;
       pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
       pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
-      al[i] = (1 - k) * 0.85;
-      sz[i] = size0[i] * (0.6 + k * 1.6); // puffs expand as they die
+      // quick fade-in kills the pop, then a soft ease-out dissolve; the
+      // grains billow outward as they die like settling powder
+      const fadeIn = Math.min(1, age[i] / 0.07);
+      al[i] = Math.pow(1 - k, 1.2) * 0.9 * fadeIn;
+      sz[i] = size0[i] * (0.5 + k * 1.9);
     }
     this.aPos.needsUpdate = true;
     this.aSize.needsUpdate = true;
     this.aAlpha.needsUpdate = true;
+    this.aShade.needsUpdate = true;
   }
 }
 

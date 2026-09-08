@@ -192,7 +192,7 @@ export class Player {
       if (braking && !this._wasBraking && this.fx && this.speed > 8) {
         const side = Math.sign(inp.steer) || 1;
         this.fx.burst(this.pos, { x: side * -dir.z, z: side * dir.x }, {
-          count: 18, speed: 5, up: 3, spread: 1.1, size: 1.2,
+          count: 26, speed: 5, up: 3, spread: 1.1, size: 0.85,
         });
       }
       this._wasBraking = braking;
@@ -262,7 +262,7 @@ export class Player {
             speed: 3 + impact * 6,
             up: 2.5 + impact * 3,
             spread: 1.4,
-            size: 1.3,
+            size: 0.95,
           });
         }
         if (sloppy) {
@@ -288,7 +288,8 @@ export class Player {
       const carve = Math.abs(this.slip) * 2.2 + Math.abs(this.latA) / 11 + (Math.abs(this.yaw) / MAX_YAW) * 0.25;
       const braking = inp.brake && !stumbling ? 1 : 0;
       const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
-      const rate = intensity * this.speed * 0.14;
+      // finer grains, more of them: a mist rather than a few big puffs
+      const rate = intensity * this.speed * 0.2;
       this._sprayAcc = (this._sprayAcc || 0) + rate * dt * 60;
       const side = Math.sign(this.yaw) || (Math.random() < 0.5 ? -1 : 1);
       while (this._sprayAcc >= 1) {
@@ -296,12 +297,12 @@ export class Player {
         const back = 0.6 + Math.random() * 0.5;
         this.fx.spawn(
           this.pos.x - dir.x * back + side * -dir.z * 0.35,
-          this.pos.y + 0.06,
+          this.pos.y + 0.16,
           this.pos.z - dir.z * back + side * dir.x * 0.35,
           -dir.x * 2 + side * -dir.z * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
           1.2 + carve * 2 + braking * 2.5 + Math.random() * 1.5,
           -dir.z * 2 + side * dir.x * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
-          0.7 + carve * 0.5 + braking * 0.7,
+          0.55 + carve * 0.4 + braking * 0.55,
           0.5 + Math.random() * 0.4
         );
       }
@@ -373,7 +374,7 @@ export class Player {
     if (this.hud) this.hud.stumbleFlash(`taken out by ${byName}!`);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.fx.burst(this.pos, dir, { count: 34, speed: 6, up: 4.5, spread: 2.6, size: 1.5 });
+      this.fx.burst(this.pos, dir, { count: 44, speed: 6, up: 4.5, spread: 2.6, size: 1.05 });
     }
   }
 
@@ -401,7 +402,7 @@ export class Player {
     if (this.hud) this.hud.stumbleFlash(reason);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.fx.burst(this.pos, dir, { count: 26, speed: 5, up: 4, spread: 2.2, size: 1.4 });
+      this.fx.burst(this.pos, dir, { count: 34, speed: 5, up: 4, spread: 2.2, size: 0.95 });
     }
   }
 
