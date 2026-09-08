@@ -522,6 +522,7 @@ export function setPose(rider, p = {}) {
   S.shift = ease(S.shift, p.shift ?? 0, 4.5); // fore/aft weight over the deck
   S.twist = ease(S.twist, p.twist ?? 0, 8); // spin rate while tricking
   S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
+  S.upLat = ease(S.upLat ?? 0, p.upLat ?? 0, 5); // where uphill is, rider frame (+ = rig right)
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
   const twist = S.twist;
@@ -578,20 +579,26 @@ export function setPose(rider, p = {}) {
   const pump = !idle && !airborne ? Math.sin(t * 4.5) * 0.04 * speed : 0;
 
   // hockey-stop: gear and body swing perpendicular together, smoothly.
-  // Which way the board checks depends on the cut: sliding left the rider's
-  // back faces the hill, sliding right the chest does (the board's swing
-  // direction was flipped relative to that); dead straight goes either way.
+  // The check always digs the UPHILL edge — whichever edge sits higher on
+  // the real slope stops the rider — so the swing side comes from the
+  // terrain, not the steer; on dead-flat fall line it goes either way.
   if ((p.brake ?? 0) > 0 && !rider._wasBraking) {
-    rider._brakeSide = Math.abs(steer) < 0.05
-      ? (Math.random() < 0.5 ? -1 : 1)
-      : steer < 0 ? -1 : 1;
+    rider._brakeSide = Math.abs(S.upLat) > 0.12
+      ? (S.upLat > 0 ? 1 : -1)
+      : Math.abs(steer) > 0.05
+        ? (steer < 0 ? -1 : 1)
+        : (Math.random() < 0.5 ? -1 : 1);
   }
   rider._wasBraking = (p.brake ?? 0) > 0;
   const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 6);
   const bkYaw = rider._brakeSide * bk;
 
-  // whole-body edge angle into the turn; knocked riders lie on their side
-  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
+  // whole-body edge angle into the turn; braking leans the body INTO the
+  // hill (toward real uphill, tracking the terrain as it curves under the
+  // rider) instead of wherever the local steer happened to point; knocked
+  // riders lie on their side
+  const hillLean = isSled ? 0 : bk * S.upLat * 0.42;
+  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) * (1 - bk * 0.6) + hillLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
     // skis pivot across the slope to scrub; the board instead noses INTO the
@@ -600,8 +607,9 @@ export function setPose(rider, p = {}) {
     if (isBoard) {
       // the rig roll above banks the whole prefab — including the deck, which
       // looked fake. Counter-roll the board so it glides flat on the snow,
-      // keeping only a slight edge tilt into the carve.
-      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) - swayB * 0.3, 7, 0.6);
+      // keeping only a slight edge tilt into the carve; a brake check digs
+      // the deck onto its UPHILL edge (deck top tips away from the hill)
+      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - hillLean - bk * S.upLat * 0.22 - swayB * 0.3, 7, 0.6);
     }
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
