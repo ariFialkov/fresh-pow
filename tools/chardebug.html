@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>char debug</title><style>body{margin:0}</style></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { loadCharacters, createCharacter, MODEL_SCALE, __debug } from '/src/game/characters.js';
+
+await loadCharacters();
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(900, 640);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6f89a4);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x667788, 1.0));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
+sun.position.set(2, 4, 3);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(40, 900 / 640, 0.01, 100);
+
+// three skiers: flipY=true, flipY=false, uv debug (uv as color)
+const uvTestMat = new THREE.ShaderMaterial({
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'varying vec2 vUv; void main(){ gl_FragColor = vec4(vUv, 0.0, 1.0); }',
+});
+
+const info = {};
+for (const [i, mode] of ['flipTrue', 'flipFalse', 'uv'].entries()) {
+  const char = createCharacter('ski', 0xfbbf24, 42);
+  const wrap = new THREE.Group();
+  wrap.rotation.y = Math.PI;
+  wrap.scale.setScalar(MODEL_SCALE);
+  wrap.add(char.root);
+  wrap.position.set((i - 1) * 1.4, 0, 0);
+  scene.add(wrap);
+  if (mode === 'flipFalse') {
+    char.mesh.material.map = char.mesh.material.map.clone();
+    char.mesh.material.map.flipY = false;
+    char.mesh.material.map.needsUpdate = true;
+  } else if (mode === 'uv') {
+    char.mesh.material = uvTestMat;
+  }
+  if (i === 0) {
+    const geo = char.mesh.geometry;
+    info.attrs = Object.keys(geo.attributes);
+    const uv = geo.attributes.uv;
+    info.uv = uv
+      ? { count: uv.count, normalized: uv.normalized, sample: [uv.getX(0), uv.getY(0), uv.getX(500), uv.getY(500)] }
+      : null;
+  }
+}
+window.__info = JSON.stringify(info);
+
+camera.position.set(0, 1.15, 4.2);
+camera.lookAt(0, 0.85, 0);
+renderer.render(scene, camera);
+window.__shot = renderer.domElement.toDataURL('image/png');
+window.__done = true;
+</script>
+</body>
+</html>

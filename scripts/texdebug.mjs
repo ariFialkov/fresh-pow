@@ -1,0 +1,18 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const server = await createServer({ server: { port: 4304, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+page.on('console', (m) => console.log('console:', m.text()));
+await page.goto('http://localhost:4304/tools/texdebug.html');
+await page.waitForFunction(() => !!window.__result, undefined, { timeout: 180000 });
+const r = JSON.parse(await page.evaluate(() => window.__result));
+fs.writeFileSync('scratch-variant.png', Buffer.from(r.texURL, 'base64'));
+delete r.texURL;
+console.log(JSON.stringify(r, null, 1));
+await browser.close();
+await server.close();
+process.exit(0);

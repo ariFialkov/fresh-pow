@@ -1,0 +1,17 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const server = await createServer({ server: { port: 4305, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+page.on('console', (m) => console.log('console:', m.text()));
+await page.goto('http://localhost:4305/tools/chardebug.html');
+await page.waitForFunction(() => !!window.__done, undefined, { timeout: 180000 });
+const shot = await page.evaluate(() => window.__shot);
+fs.writeFileSync('scratch-chardebug.png', Buffer.from(shot.split(',')[1], 'base64'));
+console.log(await page.evaluate(() => window.__info));
+await browser.close();
+await server.close();
+process.exit(0);

@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>fbx convert</title></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const K = 10; // color clusters per model
+const SIZE = 1024; // classmap resolution
+
+const loader = new FBXLoader();
+const out = { reports: {}, files: {} }; // files: name -> base64
+
+const b64 = (buf) => {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+};
+
+async function waitImage(tex, ms = 15000) {
+  const t0 = performance.now();
+  while (!(tex?.image && tex.image.width > 0)) {
+    if (performance.now() - t0 > ms) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return true;
+}
+
+for (const id of ['boarder', 'skier', 'tuber']) {
+  const obj = await loader.loadAsync(`/models/${id}.fbx`);
+  const report = { id };
+
+  // ---- find the skinned mesh + texture ----
+  let mesh = null;
+  obj.traverse((o) => {
+    if (o.isSkinnedMesh) mesh = o;
+  });
+  const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  const ok = await waitImage(mat.map);
+  report.textureLoaded = ok;
+
+  if (ok) {
+    // ---- draw texture at classmap size ----
+    const c = document.createElement('canvas');
+    c.width = c.height = SIZE;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(mat.map.image, 0, 0, SIZE, SIZE);
+    // FBX/GL UV v runs bottom-up while canvas is top-down; texture.flipY
+    // handles that at runtime — bake the classmap in the same orientation
+    // as the source image so runtime sampling matches.
+    const data = ctx.getImageData(0, 0, SIZE, SIZE);
+    const px = data.data;
+
+    // ---- k-means in rgb ----
+    const samples = [];
+    for (let i = 0; i < px.length; i += 4 * 37) samples.push([px[i], px[i + 1], px[i + 2]]);
+    let centers = [];
+    for (let i = 0; i < K; i++) centers.push(samples[Math.floor((i + 0.5) * samples.length / K)]);
+    for (let iter = 0; iter < 14; iter++) {
+      const sum = centers.map(() => [0, 0, 0, 0]);
+      for (const s of samples) {
+        let bi = 0, bd = 1e9;
+        for (let ci = 0; ci < K; ci++) {
+          const c0 = centers[ci];
+          const d = (s[0] - c0[0]) ** 2 + (s[1] - c0[1]) ** 2 + (s[2] - c0[2]) ** 2;
+          if (d < bd) { bd = d; bi = ci; }
+        }
+        sum[bi][0] += s[0]; sum[bi][1] += s[1]; sum[bi][2] += s[2]; sum[bi][3]++;
+      }
+      centers = sum.map((s0, ci) => (s0[3] ? [s0[0] / s0[3], s0[1] / s0[3], s0[2] / s0[3]] : centers[ci]));
+    }
+    // sort clusters by population for stable ordering
+    const counts = centers.map(() => 0);
+    for (const s of samples) {
+      let bi = 0, bd = 1e9;
+      for (let ci = 0; ci < K; ci++) {
+        const c0 = centers[ci];
+        const d = (s[0] - c0[0]) ** 2 + (s[1] - c0[1]) ** 2 + (s[2] - c0[2]) ** 2;
+        if (d < bd) { bd = d; bi = ci; }
+      }
+      counts[bi]++;
+    }
+    const order = centers.map((_, i) => i).sort((a, b) => counts[b] - counts[a]);
+    centers = order.map((i) => centers[i]);
+    const pct = order.map((i) => +(100 * counts[i] / samples.length).toFixed(1));
+    report.clusters = centers.map((c0, i) => ({
+      i,
+      hex: '#' + ((1 << 24) + (Math.round(c0[0]) << 16) + (Math.round(c0[1]) << 8) + Math.round(c0[2])).toString(16).slice(1),
+      pct: pct[i],
+    }));
+
+    // ---- classmap: R = class index, G = luminance ----
+    const cm = ctx.createImageData(SIZE, SIZE);
+    for (let i = 0; i < px.length; i += 4) {
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      let bi = 0, bd = 1e9;
+      for (let ci = 0; ci < K; ci++) {
+        const c0 = centers[ci];
+        const d = (r - c0[0]) ** 2 + (g - c0[1]) ** 2 + (b - c0[2]) ** 2;
+        if (d < bd) { bd = d; bi = ci; }
+      }
+      // luminance relative to the cluster center keeps shading detail
+      const c0 = centers[bi];
+      const lum = (r + g + b + 1) / (c0[0] + c0[1] + c0[2] + 1);
+      cm.data[i] = bi * 20;
+      cm.data[i + 1] = Math.max(0, Math.min(255, Math.round(lum * 128)));
+      cm.data[i + 2] = 0;
+      cm.data[i + 3] = 255;
+    }
+    const cc = document.createElement('canvas');
+    cc.width = cc.height = SIZE;
+    cc.getContext('2d').putImageData(cm, 0, 0);
+    out.files[`${id}-classmap.png`] = cc.toDataURL('image/png').split(',')[1];
+
+    // swatch sheet for human review
+    const sw = document.createElement('canvas');
+    sw.width = K * 64; sw.height = 80;
+    const sctx = sw.getContext('2d');
+    report.clusters.forEach((cl, i) => {
+      sctx.fillStyle = cl.hex;
+      sctx.fillRect(i * 64, 0, 64, 64);
+      sctx.fillStyle = '#000';
+      sctx.font = '11px monospace';
+      sctx.fillText(`${i}:${cl.pct}%`, i * 64 + 3, 76);
+    });
+    out.files[`${id}-swatches.png`] = sw.toDataURL('image/png').split(',')[1];
+  }
+
+  // ---- strip texture/animations and export GLB ----
+  mat.map = null;
+  mat.needsUpdate = true;
+  obj.animations = [];
+  const exporter = new GLTFExporter();
+  const glb = await exporter.parseAsync(obj, { binary: true });
+  out.files[`${id}.glb`] = b64(glb);
+  report.glbBytes = glb.byteLength;
+
+  out.reports[id] = report;
+}
+
+window.__result = JSON.stringify(out);
+document.body.textContent = 'done';
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>fbx preview</title><style>body{margin:0;background:#8fb4d4}</style></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(900, 640);
+document.body.appendChild(renderer.domElement);
+
+const loader = new FBXLoader();
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fb4d4);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x667788, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
+sun.position.set(2, 4, 3);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(40, 900 / 640, 0.01, 100);
+
+const models = {};
+for (const [i, id] of ['boarder', 'skier', 'tuber'].entries()) {
+  const obj = await loader.loadAsync(`/models/${id}.fbx`);
+  obj.scale.setScalar(0.0105);
+  obj.position.set((i - 1) * 1.6, 0, 0);
+  scene.add(obj);
+  models[id] = obj;
+}
+window.__models = models;
+window.__T = THREE;
+
+// front view
+camera.position.set(0, 1.2, 4.6);
+camera.lookAt(0, 0.85, 0);
+renderer.render(scene, camera);
+window.__front = renderer.domElement.toDataURL('image/png');
+
+// three-quarter back view
+camera.position.set(3.4, 1.7, -3.6);
+camera.lookAt(0, 0.85, 0);
+renderer.render(scene, camera);
+window.__back = renderer.domElement.toDataURL('image/png');
+
+// extract each model's texture to a canvas
+window.__tex = {};
+for (const [id, obj] of Object.entries(models)) {
+  obj.traverse((o) => {
+    if (o.isMesh && o.material?.map?.image) {
+      const img = o.material.map.image;
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      c.getContext('2d').drawImage(img, 0, 0);
+      window.__tex[id] = { w: img.width, h: img.height, url: c.toDataURL('image/png') };
+    }
+  });
+}
+window.__done = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>tex debug</title></head>
+<body>
+<script type="module">
+import { loadCharacters, makePalette, __debug } from '/src/game/characters.js';
+
+await loadCharacters();
+const d = __debug();
+const out = {};
+for (const [id, a] of Object.entries(d.assets)) {
+  // classIdx histogram
+  const hist = new Array(10).fill(0);
+  for (let i = 0; i < a.classIdx.length; i += 17) hist[a.classIdx[i]]++;
+  out[id] = { hist, roles: a.roles };
+}
+out.palette = makePalette(0xfbbf24, 1234);
+const tex = d.variantTexture('skier', out.palette);
+out.texURL = tex.image.toDataURL('image/png').split(',')[1];
+window.__result = JSON.stringify(out);
+document.body.textContent = 'done';
+</script>
+</body>
+</html>

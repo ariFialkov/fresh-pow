@@ -1,15 +1,13 @@
-// Organic procedural rider rigs.
+// Rider assembly: procedural gear (skis/boards/sleds) + the uploaded rigged
+// character models (characters.js), reskinned per instance.
 //
-// No external assets: bodies are built from lathe profiles (two-piece torso,
-// thighs with quad bulge, calves with calf bulge), capsules and spheres, wired
-// into a full joint hierarchy —
-//   pelvis -> lower spine -> chest -> neck -> head
-//   chest  -> shoulders -> elbows -> wrists (+ poles for skiers)
-//   pelvis -> hips -> knees -> ankles -> boots
-// setPose() drives every joint each frame, and the pelvis height is solved
-// analytically from the leg chain so boots always plant on the gear deck.
-// Geometry and materials are cached module-wide so five riders share buffers.
+// The pose engine below is unchanged from the procedural era: setPose()
+// drives spring-damped PROXY joints in the rig's own axis conventions
+// (pelvis -> spine -> chest -> neck, shoulders -> elbows -> wrists,
+// hips -> knees -> ankles), and applySkeleton() retargets those proxies onto
+// the character's real bones every frame via precomputed rest-frame axes.
 import * as THREE from 'three';
+import { createCharacter, MODEL_SCALE } from './characters.js';
 
 const SKIN = 0xd9a878;
 const THIGH_L = 0.41;
@@ -142,7 +140,6 @@ function buildGear(gear) {
 }
 
 // ---------------------------------------------------------------- rider ----
-
 export function createRider(gear, helmetColor) {
   const root = new THREE.Group();
   const rig = new THREE.Group();
@@ -151,130 +148,112 @@ export function createRider(gear, helmetColor) {
   const isSled = gear.type === 'sled';
   const isBoard = gear.type === 'board';
 
-  const suitMat = mat(gear.suit);
-  const pantsMat = mat(darken(gear.suit, 0.5));
-  const padMat = mat(darken(gear.suit, 0.32)); // knee/elbow pads
-  const skinMat = mat(SKIN);
-  const bootMat = mat(0x23262d);
-  const gloveMat = mat(0x2e323a);
-  const helmetMat = mat(helmetColor);
-  const poleMat = mat(0x3a404c);
-
   const gearGroup = buildGear(gear);
   // boards ride a touch higher so the deck never vanishes into the snow
-  // surface between heightfield samples (the rider sink + terrain curvature
-  // was swallowing it)
   if (isBoard) gearGroup.position.y = 0.07;
   rig.add(gearGroup);
 
-  const parts = { legs: [], arms: [], poles: [] };
+  // ---- rigged character (uploaded model), reskinned per instance ----
+  let seed = helmetColor >>> 0;
+  for (const ch of gear.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const char = createCharacter(gear.type, helmetColor, seed);
+  const wrapper = new THREE.Group();
+  wrapper.rotation.y = Math.PI; // model faces +z; the rig faces -z
+  wrapper.scale.setScalar(MODEL_SCALE);
+  wrapper.add(char.root);
+  rig.add(wrapper);
 
-  // ---- pelvis ----
-  const pelvisG = new THREE.Group();
-  rig.add(pelvisG);
-  parts.pelvis = pelvisG;
-  const pelvis = mesh(capsule('pelvis', 0.125, 0.12), pantsMat);
-  pelvis.rotation.z = Math.PI / 2;
-  pelvis.scale.set(0.8, 1, 0.85);
-  pelvis.position.y = 0.0;
-  pelvisG.add(pelvis);
+  // ---- joint retarget table: per bone, the rig axes in bone-local rest
+  // frame (arms get an extra "T-pose -> hanging" offset folded in) ----
+  const RIG_AXES = {
+    x: new THREE.Vector3(-1, 0, 0), // rig +x == model -X
+    y: new THREE.Vector3(0, 1, 0),
+    z: new THREE.Vector3(0, 0, -1), // rig -z (forward) == model +Z
+  };
+  const axesFromEff = (effQ) => {
+    const inv = effQ.clone().invert();
+    return {
+      x: RIG_AXES.x.clone().applyQuaternion(inv).normalize(),
+      y: RIG_AXES.y.clone().applyQuaternion(inv).normalize(),
+      z: RIG_AXES.z.clone().applyQuaternion(inv).normalize(),
+    };
+  };
+  const ctl = { joints: {}, char };
+  const addJoint = (key, bone, effQ, offsetQ = null) => {
+    if (!bone) return;
+    ctl.joints[key] = { bone, restLocal: bone.quaternion.clone(), axes: axesFromEff(effQ), offsetQ };
+  };
+  const restWorld = (bone) => char.rest[bone.name].worldRelInv.clone().invert();
 
-  // ---- two-piece spine: lower back + chest fold separately ----
-  const spineG = new THREE.Group();
-  spineG.position.y = 0.06;
-  pelvisG.add(spineG);
-  parts.spine = spineG;
-  const lowerTorso = mesh(lathe('ltorso', [
-    [0.146, -0.02], [0.15, 0.04], [0.134, 0.12], [0.127, 0.19],
-  ], 14), suitMat);
-  lowerTorso.scale.set(1, 1, 0.72);
-  spineG.add(lowerTorso);
+  const B = char.bones;
+  addJoint('hips', B.Hips, restWorld(B.Hips));
+  if (B.Spine) addJoint('spine', B.Spine, restWorld(B.Spine));
+  if (B.Spine01) addJoint('spine1', B.Spine01, restWorld(B.Spine01));
+  if (B.Spine02) addJoint('chest', B.Spine02, restWorld(B.Spine02));
+  if (B.neck) addJoint('neck', B.neck, restWorld(B.neck));
+  if (B.Head) addJoint('head', B.Head, restWorld(B.Head));
 
-  const chestG = new THREE.Group();
-  chestG.position.y = 0.17;
-  spineG.add(chestG);
-  parts.chest = chestG;
-  const upperTorso = mesh(lathe('utorso', [
-    [0.128, -0.02], [0.152, 0.08], [0.17, 0.18], [0.162, 0.26], [0.088, 0.33],
-  ], 14), suitMat);
-  upperTorso.scale.set(1, 1, 0.72);
-  chestG.add(upperTorso);
-  const collar = mesh(capsule('collar', 0.082, 0.12), suitMat);
-  collar.rotation.z = Math.PI / 2;
-  collar.position.y = 0.3;
-  collar.scale.set(0.9, 1, 0.9);
-  chestG.add(collar);
+  for (const s of [-1, 1]) {
+    const arm = char.sided.arms[s];
+    const forearm = char.sided.forearms[s];
+    const hand = char.sided.hands[s];
+    // fold the arm from the model's T-pose down to the rig's hanging rest
+    const drop = new THREE.Quaternion().setFromAxisAngle(
+      char.rest[arm.name].axes.z,
+      -s * (Math.PI / 2 - 0.18)
+    );
+    const effArm = restWorld(arm).multiply(drop);
+    addJoint('arm' + s, arm, effArm, drop);
+    const effFore = effArm.clone().multiply(forearm.quaternion);
+    addJoint('fore' + s, forearm, effFore);
+    const effHand = effFore.clone().multiply(hand.quaternion);
+    addJoint('hand' + s, hand, effHand);
 
-  // backcountry pack — riders here always carry one
-  const pack = mesh(capsule('pack', 0.115, 0.14), mat(darken(gear.accent, 0.75)));
-  pack.scale.set(0.95, 1, 0.55);
-  pack.position.set(0, 0.12, 0.16);
-  const packLid = mesh(capsule('packlid', 0.09, 0.05), mat(darken(gear.accent, 0.5)));
-  packLid.scale.set(0.9, 1, 0.5);
-  packLid.position.set(0, 0.24, 0.15);
-  chestG.add(pack, packLid);
+    addJoint('upleg' + s, char.sided.upLegs[s], restWorld(char.sided.upLegs[s]));
+    addJoint('leg' + s, char.sided.legs[s], restWorld(char.sided.legs[s]));
+    addJoint('foot' + s, char.sided.feet[s], restWorld(char.sided.feet[s]));
+  }
 
-  // ---- neck + head ----
-  const neckG = new THREE.Group();
-  neckG.position.y = 0.33;
-  chestG.add(neckG);
-  parts.neck = neckG;
-  const neck = mesh(capsule('neck', 0.045, 0.05), skinMat);
-  neck.position.y = 0.04;
-  neckG.add(neck);
-  const headG = new THREE.Group();
-  headG.position.y = 0.13;
-  neckG.add(headG);
-  parts.head = headG;
-  const face = mesh(sphere('head', 0.094, 14, 12), skinMat);
-  face.scale.set(0.92, 1.05, 0.98);
-  const helmet = mesh(cached('helmet', () => new THREE.SphereGeometry(0.106, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6)), helmetMat);
-  helmet.position.y = 0.015;
-  const brim = mesh(cached('brim', () => new THREE.TorusGeometry(0.1, 0.018, 6, 12, Math.PI * 1.1)), helmetMat);
-  brim.rotation.x = Math.PI / 2;
-  brim.rotation.z = Math.PI * 0.42;
-  brim.position.y = 0.045;
-  const goggles = mesh(cached('goggles', () => new THREE.CapsuleGeometry(0.035, 0.12, 3, 8)), mat(0x141c28));
-  goggles.rotation.z = Math.PI / 2;
-  goggles.scale.set(1, 1, 0.6);
-  goggles.position.set(0, 0.022, -0.088);
-  headG.add(face, helmet, brim, goggles);
+  // hips crouch/shift offsets convert into the hips-parent frame
+  const hp = B.Hips.parent;
+  const hpQ = new THREE.Quaternion();
+  hp.getWorldQuaternion(hpQ);
+  const rootQ = new THREE.Quaternion();
+  char.root.getWorldQuaternion(rootQ);
+  ctl.hipsParentInv = rootQ.invert().multiply(hpQ).invert();
+  ctl.hipsRestPos = B.Hips.position.clone();
 
-  // ---- arms: shoulder -> elbow -> wrist ----
-  for (const side of [-1, 1]) {
-    const shoulderG = new THREE.Group();
-    shoulderG.position.set(side * 0.185, 0.25, 0);
-    chestG.add(shoulderG);
-    const delt = mesh(sphere('delt', 0.065), suitMat);
-    shoulderG.add(delt);
-    const uarm = mesh(lathe('uarm', [
-      [0.032, -0.24], [0.04, -0.15], [0.048, -0.05], [0.04, 0.01],
-    ]), suitMat);
-    shoulderG.add(uarm);
-    const elbowG = new THREE.Group();
-    elbowG.position.y = -0.25;
-    shoulderG.add(elbowG);
-    const elbowPad = mesh(sphere('elbow', 0.045), padMat);
-    elbowG.add(elbowPad);
-    const farm = mesh(lathe('farm', [
-      [0.024, -0.23], [0.032, -0.15], [0.041, -0.06], [0.035, 0.01],
-    ]), suitMat);
-    elbowG.add(farm);
-    const wristG = new THREE.Group();
-    wristG.position.y = -0.25;
-    elbowG.add(wristG);
-    const cuff = mesh(capsule('wcuff', 0.032, 0.03), gloveMat);
-    cuff.position.y = 0.02;
-    const hand = mesh(sphere('hand', 0.046), gloveMat);
-    hand.scale.set(0.8, 1.15, 0.95);
-    hand.position.y = -0.03;
-    wristG.add(cuff, hand);
-    parts.arms.push({ shoulder: shoulderG, elbow: elbowG, wrist: wristG, side });
+  // ---- proxy joints: the pose code keeps its own rig semantics ----
+  const proxy = () => ({ rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 }, userData: {} });
+  const parts = {
+    pelvis: proxy(),
+    spine: proxy(),
+    chest: proxy(),
+    neck: proxy(),
+    head: proxy(),
+    legs: [
+      { hip: proxy(), knee: proxy(), ankle: proxy(), index: 0, side: -1 },
+      { hip: proxy(), knee: proxy(), ankle: proxy(), index: 1, side: 1 },
+    ],
+    arms: [
+      { shoulder: proxy(), elbow: proxy(), wrist: proxy(), side: -1 },
+      { shoulder: proxy(), elbow: proxy(), wrist: proxy(), side: 1 },
+    ],
+    poles: [],
+  };
 
-    if (gear.type === 'ski') {
+  // ski poles hang from the hands: a holder cancels the hand's rest
+  // orientation so the pole lives in rig space and swings with the wrist
+  if (gear.type === 'ski') {
+    const poleMat = mat(0x3a404c);
+    for (const s of [-1, 1]) {
+      const hand = char.sided.hands[s];
+      const holder = new THREE.Group();
+      const handRest = restWorld(hand);
+      holder.quaternion.copy(handRest.invert()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI));
+      holder.scale.setScalar(1 / MODEL_SCALE);
+      hand.add(holder);
       const poleG = new THREE.Group();
-      poleG.position.y = -0.03;
-      wristG.add(poleG);
       const pole = mesh(cached('pole', () => new THREE.CylinderGeometry(0.011, 0.011, 1.05, 5)), poleMat);
       pole.position.y = -0.38;
       const basket = mesh(cached('basket', () => new THREE.ConeGeometry(0.045, 0.03, 8)), poleMat);
@@ -282,48 +261,12 @@ export function createRider(gear, helmetColor) {
       const grip = mesh(capsule('grip', 0.02, 0.06), mat(gear.accent));
       grip.position.y = 0.05;
       poleG.add(pole, basket, grip);
+      holder.add(poleG);
       parts.poles.push(poleG);
     }
   }
 
-  // ---- legs: hip -> knee -> ankle. Hip joints tuck INSIDE the pelvis and
-  // wear a covering sphere so bends never open a gap. ----
-  const hipXZ = isBoard
-    ? [{ x: -0.05, z: -0.07 }, { x: 0.05, z: 0.07 }]
-    : [{ x: -0.1, z: 0 }, { x: 0.1, z: 0 }];
-  for (const [i, s] of hipXZ.entries()) {
-    const hipG = new THREE.Group();
-    hipG.position.set(s.x, -0.05, s.z);
-    pelvisG.add(hipG);
-    const hipCover = mesh(sphere('hipc', 0.075), pantsMat);
-    hipG.add(hipCover);
-    const thigh = mesh(lathe('thigh', [
-      [0.05, -0.42], [0.06, -0.3], [0.07, -0.16], [0.077, -0.06], [0.062, 0.02],
-    ]), pantsMat);
-    hipG.add(thigh);
-    const kneeG = new THREE.Group();
-    kneeG.position.y = -THIGH_L;
-    hipG.add(kneeG);
-    const kneePad = mesh(sphere('knee', 0.06), padMat);
-    kneeG.add(kneePad);
-    const calf = mesh(lathe('calf', [
-      [0.035, -0.4], [0.042, -0.27], [0.06, -0.13], [0.055, -0.04], [0.04, 0.02],
-    ]), pantsMat);
-    kneeG.add(calf);
-    const ankleG = new THREE.Group();
-    ankleG.position.y = -CALF_L;
-    kneeG.add(ankleG);
-    const boot = mesh(capsule('boot', 0.055, 0.14), bootMat);
-    boot.rotation.x = Math.PI / 2;
-    boot.scale.set(0.95, 1, 0.75);
-    boot.position.set(0, -0.05, -0.03);
-    const cuff2 = mesh(capsule('cuff', 0.06, 0.05), bootMat);
-    cuff2.position.set(0, 0.02, 0.01);
-    ankleG.add(boot, cuff2);
-    parts.legs.push({ hip: hipG, knee: kneeG, ankle: ankleG, index: i });
-  }
-
-  // soft contact blob (real shadows carry most of the grounding now)
+  // soft contact blob (real shadows carry most of the grounding)
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(0.8, 16),
     new THREE.MeshBasicMaterial({ color: 0x0b1c2c, transparent: true, opacity: 0.13, depthWrite: false })
@@ -331,17 +274,10 @@ export function createRider(gear, helmetColor) {
   shadow.rotation.x = -Math.PI / 2;
   root.add(shadow);
 
-  // riders cast real shadows onto the snow (the blob is just soft contact)
-  rig.traverse((o) => {
-    if (o.isMesh) o.castShadow = true;
-  });
-
   const rider = {
-    root, rig, gearGroup, parts, shadow,
+    root, rig, gearGroup, parts, shadow, char, ctl,
     isSled, isBoard, type: gear.type,
     baseBodyYaw: isBoard ? 0.6 : 0,
-    // visual-only: the deck yaws to run under the angled stance line, so the
-    // boots sit on the board instead of hanging off its edges
     gearYawBase: isBoard ? 0.29 : 0,
     _brakeSmooth: 0,
     _brakeSide: 1,
@@ -352,6 +288,58 @@ export function createRider(gear, helmetColor) {
   return rider;
 }
 
+// ------------------------------------------------------ skeleton apply ----
+
+const STAND_Y = 1.0; // the pose solver's standing pelvis height (meters)
+const _aq = new THREE.Quaternion();
+const _av = new THREE.Vector3();
+
+function setJoint(ctl, key, rx, ry, rz) {
+  const j = ctl.joints[key];
+  if (!j) return;
+  const q = j.bone.quaternion.copy(j.restLocal);
+  if (j.offsetQ) q.multiply(j.offsetQ);
+  if (ry) q.multiply(_aq.setFromAxisAngle(j.axes.y, ry));
+  if (rx) q.multiply(_aq.setFromAxisAngle(j.axes.x, rx));
+  if (rz) q.multiply(_aq.setFromAxisAngle(j.axes.z, rz));
+}
+
+/** Retargets the proxy joints onto the character skeleton. */
+function applySkeleton(rider) {
+  const { ctl, parts: P } = rider;
+  if (!ctl) return;
+
+  const pel = P.pelvis;
+  setJoint(ctl, 'hips', pel.rotation.x, pel.rotation.y, pel.rotation.z);
+  const dy = (pel.position.y - STAND_Y) / MODEL_SCALE;
+  const dz = -pel.position.z / MODEL_SCALE;
+  _av.set(0, dy, dz).applyQuaternion(ctl.hipsParentInv);
+  ctl.joints.hips.bone.position.copy(ctl.hipsRestPos).add(_av);
+
+  // the torso fold spreads across the model's three spine bones
+  const sp = P.spine.rotation, chn = P.chest.rotation;
+  setJoint(ctl, 'spine', sp.x * 0.6, sp.y * 0.6, sp.z * 0.6);
+  setJoint(ctl, 'spine1', sp.x * 0.4 + chn.x * 0.3, sp.y * 0.4 + chn.y * 0.3, sp.z * 0.4 + chn.z * 0.3);
+  setJoint(ctl, 'chest', chn.x * 0.7, chn.y * 0.7, chn.z * 0.7);
+  const nk = P.neck.rotation;
+  setJoint(ctl, 'neck', nk.x * 0.55, nk.y * 0.55, nk.z * 0.55);
+  setJoint(ctl, 'head', nk.x * 0.45, nk.y * 0.45, nk.z * 0.45);
+
+  for (const arm of P.arms) {
+    const s = arm.side;
+    setJoint(ctl, 'arm' + s, arm.shoulder.rotation.x, arm.shoulder.rotation.y, arm.shoulder.rotation.z);
+    setJoint(ctl, 'fore' + s, arm.elbow.rotation.x, 0, 0);
+    setJoint(ctl, 'hand' + s, arm.wrist.rotation.x, 0, 0);
+  }
+  for (const leg of P.legs) {
+    const s = leg.side;
+    setJoint(ctl, 'upleg' + s, leg.hip.rotation.x, leg.hip.rotation.y, leg.hip.rotation.z);
+    setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
+    setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, 0);
+  }
+}
+
+// ---------------------------------------------------------------- pose ----
 // ---------------------------------------------------------------- pose ----
 
 /**
@@ -449,7 +437,7 @@ export function setPose(rider, p = {}) {
   }
 
   if (isSled) {
-    PY(parts.pelvis, 0.34 - knocked * 0.1);
+    PY(parts.pelvis, 0.5 - knocked * 0.1); // seat height: butt on the deck, legs clear of it
     RY(parts.pelvis, bkYaw * 0.25);
     const spx = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + longG * -0.3 + swayB * 0.5 + knocked * 0.4;
     RX(parts.spine, spx, 9, 0.65);
@@ -469,6 +457,7 @@ export function setPose(rider, p = {}) {
       RX(arm.elbow, 0.5 + brake * 0.5, 9, 0.55);
       RX(arm.wrist, -0.3, 7, 0.45);
     }
+    applySkeleton(rider);
     return;
   }
 
@@ -599,4 +588,5 @@ export function setPose(rider, p = {}) {
     const env = plantEnv[i];
     RX(pole, mix(-1.15, -2.05, tuck) + longG * 0.3 + env * 1.05, 6, 0.45);
   }
+  applySkeleton(rider);
 }

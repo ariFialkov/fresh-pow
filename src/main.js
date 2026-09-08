@@ -8,6 +8,7 @@ import { needsTopUp, topUp, state } from './game/state.js';
 import { Quality } from './game/world.js';
 import { EVENTS } from './game/rtp.js';
 import { showEventRoller } from './game/hud.js';
+import { loadCharacters } from './game/characters.js';
 
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -104,7 +105,19 @@ renderer.setAnimationLoop(() => {
   }
 });
 
-toMenu();
+// character models load before the lodge opens
+(async () => {
+  const loadEl = document.createElement('div');
+  loadEl.id = 'boot-loading';
+  loadEl.textContent = 'WAXING THE GEAR…';
+  document.getElementById('ui').appendChild(loadEl);
+  try {
+    await loadCharacters();
+  } finally {
+    loadEl.remove();
+  }
+  toMenu();
+})();
 
 // ---- PWA ----
 if ('serviceWorker' in navigator && !location.hostname.includes('localhost')) {
