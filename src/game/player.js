@@ -273,6 +273,27 @@ export class Player {
       }
     }
 
+    // deep frontside carve: the trailing mitt brushes the snow and leaves
+    // its own thin feather of spray behind the hand
+    const mitt = this.rider.mittDrag ?? 0;
+    if (this.fx && !this.airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8) {
+      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.09 * dt * 60;
+      const mw = this.rider.mittWorld;
+      while (this._mittAcc >= 1) {
+        this._mittAcc -= 1;
+        this.fx.spawn(
+          mw.x + (Math.random() - 0.5) * 0.12,
+          mw.y - 0.05,
+          mw.z + (Math.random() - 0.5) * 0.12,
+          -dir.x * 1.5 + (Math.random() - 0.5) * 0.8,
+          0.6 + Math.random() * 0.7,
+          -dir.z * 1.5 + (Math.random() - 0.5) * 0.8,
+          0.3 + Math.random() * 0.15,
+          0.3 + Math.random() * 0.25
+        );
+      }
+    }
+
     this._sync(dt);
 
     // legs work the terrain like suspension: rough snow = constant absorption

@@ -342,6 +342,15 @@ function applySkeleton(rider) {
     setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
     setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, leg.ankle.rotation.z);
   }
+
+  // trailing-hand world position while the mitt is brushing the snow
+  if ((rider.mittDrag ?? 0) > 0.05) {
+    const hb = ctl.joints['hand-1']?.bone;
+    if (hb) {
+      if (!rider.mittWorld) rider.mittWorld = new THREE.Vector3();
+      hb.getWorldPosition(rider.mittWorld);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- pose ----
@@ -433,7 +442,7 @@ export function setPose(rider, p = {}) {
   const bkYaw = rider._brakeSide * bk;
 
   // whole-body edge angle into the turn; knocked riders lie on their side
-  RZ(rider.rig, -steer * (isSled ? 0.28 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
+  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
     // skis/board pivot across the slope to scrub speed
@@ -445,50 +454,57 @@ export function setPose(rider, p = {}) {
   if (isSled && rider.isSaucer) {
     // tube ride: kneeling in the dish — shins along the bottom, toes pointed
     // back past the rim, butt near the heels, hands down on the handles
+    // holding onto the tube keeps the body quiet: small smooth leans, knees
+    // riding the bumps, the head tucking in a little as speed picks up
     PY(parts.pelvis, 0.58 - knocked * 0.18);
     RY(parts.pelvis, bkYaw * 0.25);
-    const spx = 0.3 + brake * -0.35 + tuck * 0.25 + wobS + longG * -0.3 + swayB * 0.5 + knocked * 0.4;
-    RX(parts.spine, spx, 9, 0.65);
-    RZ(parts.spine, -steer * 0.3 + swayA, 9, 0.65);
-    RX(parts.chest, 0.12 + brake * -0.12 + tuck * 0.15 + longG * -0.2, 8.5, 0.6);
-    RX(parts.neck, -(spx + 0.15) * 0.75 + longG * 0.25, 7, 0.5);
-    RZ(parts.neck, steer * 0.22 + swayA * 0.8, 7, 0.5);
+    const spx = 0.28 + brake * -0.22 + tuck * 0.18 + wobS * 0.6 + longG * -0.2 + swayB * 0.3 + knocked * 0.4;
+    RX(parts.spine, spx, 8, 0.6);
+    RZ(parts.spine, -steer * 0.2 + swayA * 0.6, 8, 0.6);
+    RX(parts.chest, 0.1 + tuck * 0.12 + longG * -0.14 + speed * 0.08, 8, 0.6);
+    RX(parts.neck, -(spx + 0.1) * 0.7 + longG * 0.2 + speed * 0.14, 7, 0.5);
+    RZ(parts.neck, steer * 0.16 + swayA * 0.5, 7, 0.5);
     for (const leg of parts.legs) {
-      RX(leg.hip, 0.3 + breathe * 0.02); // thigh near vertical, a hint forward
+      // thigh near vertical; the knees soak the bumps in small up-downs
+      RX(leg.hip, 0.3 + breathe * 0.02 + jolt * 0.14 + swayB * 0.06, 9, 0.6);
       RZ(leg.hip, leg.side * 0.14); // knees spread toward the rim
       RX(leg.knee, -2.25); // deep fold: shin back along the dish
       RX(leg.ankle, 0.85); // toes pointed behind
       RY(leg.ankle, 0);
       RZ(leg.ankle, 0);
     }
+    const grip = Math.abs(steer) * 0.3 + brake * 0.3; // hang on tighter through turns
     for (const arm of parts.arms) {
-      RX(arm.shoulder, -0.6 + brake * 0.4 + air * -0.55 + wobA + longG * -0.45 + swayA * arm.side + knocked * 0.8, 8, 0.5);
-      RZ(arm.shoulder, arm.side * (-0.22 + jolt * 0.5 + knocked * 0.9), 8, 0.5);
-      RX(arm.elbow, 0.4 + brake * 0.4, 9, 0.55);
+      RX(arm.shoulder, -0.6 + brake * 0.25 + air * -0.35 + wobA * 0.6 + longG * -0.3 + swayA * arm.side * 0.6 + knocked * 0.8, 8, 0.5);
+      RZ(arm.shoulder, arm.side * (-0.22 + jolt * 0.35 + knocked * 0.9), 8, 0.5);
+      RX(arm.elbow, 0.4 + grip, 9, 0.55);
       RX(arm.wrist, -0.3, 7, 0.45);
     }
     applySkeleton(rider);
     return;
   }
   if (isSled) {
+    // seated sledder gripping the deck: quiet body, smooth small leans,
+    // knees riding the chop, head ducking a touch with speed
     PY(parts.pelvis, 0.5 - knocked * 0.1); // seat height: butt on the deck, legs clear of it
     RY(parts.pelvis, bkYaw * 0.25);
-    const spx = 0.14 + brake * -0.4 + tuck * 0.3 + wobS + longG * -0.3 + swayB * 0.5 + knocked * 0.4;
-    RX(parts.spine, spx, 9, 0.65);
-    RZ(parts.spine, -steer * 0.3 + swayA, 9, 0.65);
-    RX(parts.chest, 0.1 + brake * -0.15 + tuck * 0.2 + longG * -0.2, 8.5, 0.6);
-    RX(parts.neck, -(spx + 0.1) * 0.7 + longG * 0.25, 7, 0.5);
-    RZ(parts.neck, steer * 0.22 + swayA * 0.8, 7, 0.5);
+    const spx = 0.14 + brake * -0.25 + tuck * 0.2 + wobS * 0.6 + longG * -0.2 + swayB * 0.3 + knocked * 0.4;
+    RX(parts.spine, spx, 8, 0.6);
+    RZ(parts.spine, -steer * 0.2 + swayA * 0.6, 8, 0.6);
+    RX(parts.chest, 0.1 + tuck * 0.15 + longG * -0.14 + speed * 0.07, 8, 0.6);
+    RX(parts.neck, -(spx + 0.1) * 0.7 + longG * 0.2 + speed * 0.12, 7, 0.5);
+    RZ(parts.neck, steer * 0.16 + swayA * 0.5, 7, 0.5);
     for (const leg of parts.legs) {
-      RX(leg.hip, 1.5 + breathe * 0.02);
+      RX(leg.hip, 1.5 + breathe * 0.02 + jolt * 0.12 + swayB * 0.05, 9, 0.6);
       RX(leg.knee, -0.95);
       RX(leg.ankle, -0.6);
       RY(leg.ankle, 0);
     }
+    const grip = Math.abs(steer) * 0.3 + brake * 0.25; // hang on tighter through turns
     for (const arm of parts.arms) {
-      RX(arm.shoulder, -0.85 + brake * 0.55 + air * -0.5 + wobA + longG * -0.45 + swayA * arm.side + knocked * 0.8, 8, 0.5);
-      RZ(arm.shoulder, arm.side * (-0.18 + jolt * 0.5 + knocked * 0.9), 8, 0.5);
-      RX(arm.elbow, 0.5 + brake * 0.5, 9, 0.55);
+      RX(arm.shoulder, -0.85 + brake * 0.3 + air * -0.3 + wobA * 0.6 + longG * -0.3 + swayA * arm.side * 0.6 + knocked * 0.8, 8, 0.5);
+      RZ(arm.shoulder, arm.side * (-0.18 + jolt * 0.35 + knocked * 0.9), 8, 0.5);
+      RX(arm.elbow, 0.5 + grip, 9, 0.55);
       RX(arm.wrist, -0.3, 7, 0.45);
     }
     applySkeleton(rider);
@@ -496,11 +512,20 @@ export function setPose(rider, p = {}) {
   }
 
   // ---- standing riders (ski / board) ----
-  // ground and air stances blend continuously through S.air
+  // deep frontside carve: the whole body sinks and the trailing mitt reaches
+  // down to brush the snow (race scene reads mittDrag + mittWorld for spray)
+  const fsDrag = isBoard && !idle
+    ? Math.max(0, (steer - 0.45) / 0.55) * (1 - air) * (1 - tuck) * (1 - knocked)
+    : 0;
+  rider.mittDrag = fsDrag;
+
+  // ground and air stances blend continuously through S.air. Legs stay long
+  // and casual — knees only really load up through turns, landings and
+  // tucks, never as a resting crouch; airborne legs stay floaty, not balled.
   const kneeGround = idle
-    ? (isBoard ? 0.22 : 0.18) + breathe * 0.03
-    : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
-  const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2 + curl * 0.55 + Math.abs(twist) * 0.3) * air;
+    ? (isBoard ? 0.2 : 0.14) + breathe * 0.03
+    : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * 0.5 + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
+  const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25) * air;
 
   // per-leg chain angles. The board pelvis rides yawed nearly across the
   // deck, so its feet straddle the board line by thigh ab/adduction in the
@@ -525,12 +550,18 @@ export function setPose(rider, p = {}) {
   // lands on the deck line (the leg fold drifts the feet sideways with yaw)
   PZ(parts.pelvis, -shift * 0.11);
   PX(parts.pelvis, isBoard ? -0.19 : 0);
-  const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
-  RY(parts.pelvis, pelvisYaw, 11, 0.75);
+  // hips flow with the turn on a lazy spring — the twist "catches up" the
+  // torso rather than snapping with it. Board heelside carves open the hips
+  // toward the fall line (that laid-back backside look); ski hips swing
+  // gently into every turn.
+  const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8)
+    + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck);
+  RY(parts.pelvis, pelvisYaw, 7, 0.7);
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : 0.2 + tuck * 0.45 - brake * 0.22 + knocked * 0.5 + shift * 0.22;
+    : (isBoard ? 0.14 : 0.06) + tuck * 0.45 - brake * 0.22 + knocked * 0.5 + shift * 0.22
+      + (isBoard ? Math.min(0, steer) * 0.25 : 0); // heelside: lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
@@ -538,10 +569,10 @@ export function setPose(rider, p = {}) {
   RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
-  RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * 0.18 + twist * 0.35 * air, 9, 0.65);
+  RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
   RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22, 8.5, 0.6);
   RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
-  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * 0.14 + twist * 0.5 * air, 8.5, 0.6);
+  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
   RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 + longG * 0.3, 6.5, 0.48);
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
@@ -557,7 +588,9 @@ export function setPose(rider, p = {}) {
     // boots stay bound to the deck line whatever the hips do; board boots
     // pick up duck-ish binding angles (front foot open, back foot near zero)
     const bindAngle = isBoard ? (leg.index === 0 ? 0.28 : -0.08) : 0;
-    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y + bindAngle, 16, 0.95);
+    // same spring as the pelvis yaw so the boots don't twist while the
+    // hips lazily catch up through a turn
+    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y + bindAngle, 7, 0.7);
   }
 
   // ---- pole plants: entering a carve, the inside arm punches forward and
@@ -601,14 +634,20 @@ export function setPose(rider, p = {}) {
       sz = mix(arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45, arm.side * 0.15, tuck);
       ex = mix(0.5 + inside * 0.55 + swayB * 0.35, 0.18, tuck);
       wx = arm.side * steer * 0.2;
+      if (arm.side < 0 && fsDrag > 0) {
+        // trailing mitt drops toward the snow on the toeside lean
+        sx = mix(sx, 0.5, fsDrag);
+        sz = mix(sz, -1.45, fsDrag);
+        ex = mix(ex, 0.08, fsDrag);
+      }
     } else {
       // skier: hands ride in front, elbows pumping with the carve; the tuck
       // sends both arms straight back with the poles trailing uphill; pole
       // plants punch the inside hand forward with the elbow extending
       const env = plantEnv[pi];
-      sx = mix(0.5 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + env * 0.95;
+      sx = mix(0.42 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + env * 0.95;
       sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck);
-      ex = mix(0.9 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - env * 0.55;
+      ex = mix(0.72 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - env * 0.55;
       wx = mix(0.35 - bk * 0.5, 0.05, tuck) - env * 0.85;
     }
     // airborne arms: spread for balance, whip TOWARD the spin to feed it,
@@ -630,10 +669,11 @@ export function setPose(rider, p = {}) {
     RX(arm.wrist, wx + swayB * 0.4, 7, 0.45);
   }
   for (const [i, pole] of parts.poles.entries()) {
-    // poles trail at cruise, sweep flat back-uphill in a tuck, and swing
-    // forward to stab the snow on a plant
+    // poles dangle loose behind the hands at cruise (that thrown-away flowy
+    // look), sweep flat back-uphill in a tuck, and swing forward to stab on
+    // a plant. The soft spring lets them lag and swing like dead weight.
     const env = plantEnv[i];
-    RX(pole, mix(-1.15, -2.05, tuck) + longG * 0.3 + env * 1.05, 6, 0.45);
+    RX(pole, mix(-1.72, -2.1, tuck) + longG * 0.3 + env * 1.6, 4.5, 0.38);
   }
   applySkeleton(rider);
 }

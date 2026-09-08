@@ -30,6 +30,8 @@ const poses = [
   ['riding', { steer: 0.4, speedNorm: 0.6 }],
   ['tuck', { tuck: 1, speedNorm: 1 }],
   ['brake', { brake: 1, steer: 0.3, speedNorm: 0.5 }],
+  ['carvefs', { steer: 0.95, speedNorm: 0.75 }],
+  ['carvebs', { steer: -0.95, speedNorm: 0.75 }],
   ['knocked', { knocked: 1 }],
 ];
 
