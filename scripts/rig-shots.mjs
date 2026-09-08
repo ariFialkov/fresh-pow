@@ -20,7 +20,8 @@ await page.evaluate(() => {
     const r = m.playerRider;
     window.__fp.setPose(r, { ...(window.__fp.pose || { idle: true }), t: m.t, dt });
     const p = r.root.position;
-    m.camera.position.set(p.x + 2.2, p.y + 1.5, p.z + 2.6);
+    if (window.__fp.camFront) m.camera.position.set(p.x - 2.4, p.y + 1.3, p.z - 2.2);
+    else m.camera.position.set(p.x + 2.2, p.y + 1.5, p.z + 2.6);
     m.camera.lookAt(p.x, p.y + 0.75, p.z);
   };
 });
@@ -44,9 +45,17 @@ for (const [label, index] of [['ski', 0], ['board', 4], ['sled', 8], ['saucer', 
   for (const [poseName, pose] of poses) {
     await page.evaluate((p) => {
       window.__fp.pose = p;
+      window.__fp.camFront = false;
     }, pose);
     await page.waitForTimeout(600);
     await page.screenshot({ path: `scratch-rig-${label}-${poseName}.png` });
+    // second angle from the front-side: knee/fold direction is invisible
+    // from behind, which is how a backwards-knee bug once slipped through
+    await page.evaluate(() => {
+      window.__fp.camFront = true;
+    });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: `scratch-rig-${label}-${poseName}-front.png` });
     console.log(`shot ${label}/${poseName}`);
   }
 }

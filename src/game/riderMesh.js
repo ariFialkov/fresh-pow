@@ -440,8 +440,10 @@ function applySkeleton(rider) {
       const reach = ik.L1 + ik.L2;
       const d = Math.min(Math.max(_v1.length(), reach * 0.3), reach * 0.995);
       _v1.normalize();
-      // bend plane: knees kick forward of the chain
-      _kf.set(Math.sin(kneeYaw), 0, -Math.cos(kneeYaw)).applyQuaternion(_rigQ);
+      // bend plane: knees kick out the way the rider faces (yaw + faces -x,
+      // so the facing vector is (-sin, 0, -cos) — the sign matters: flipped,
+      // the knees bend backwards and the legs read as twisted around)
+      _kf.set(-Math.sin(kneeYaw), 0, -Math.cos(kneeYaw)).applyQuaternion(_rigQ);
       _n.crossVectors(_kf, _v1);
       if (_n.lengthSq() < 1e-6) _n.set(-1, 0, 0).applyQuaternion(_rigQ);
       _n.normalize();
