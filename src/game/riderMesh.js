@@ -315,9 +315,11 @@ export function createRider(gear, helmetColor) {
     isSled, isBoard, type: gear.type,
     isSaucer: gear.id === 'sled-saucer',
     // sideways stance: the feet straddle line sits perpendicular to the
-    // pelvis facing, so yaw = PI/2 - boardYaw lines it up with the deck
-    baseBodyYaw: isBoard ? Math.PI / 2 - 0.22 : 0,
-    gearYawBase: isBoard ? 0.22 : 0,
+    // pelvis facing, so yaw = PI/2 - boardYaw lines it up with the deck.
+    // The board itself points dead forward — its trail runs straight, so
+    // the deck must too, or the line looks like it leaves at an angle.
+    baseBodyYaw: isBoard ? Math.PI / 2 : 0,
+    gearYawBase: 0,
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
