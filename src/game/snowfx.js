@@ -12,12 +12,12 @@ function getSprite() {
   c.width = c.height = 96;
   const ctx = c.getContext('2d');
   const lobes = [
-    [48, 48, 34, 0.55],
-    [36, 40, 20, 0.4],
-    [60, 42, 18, 0.42],
-    [44, 60, 22, 0.38],
-    [58, 58, 15, 0.35],
-    [38, 55, 12, 0.3],
+    [48, 48, 34, 0.85],
+    [36, 40, 20, 0.6],
+    [60, 42, 18, 0.62],
+    [44, 60, 22, 0.58],
+    [58, 58, 15, 0.55],
+    [38, 55, 12, 0.5],
   ];
   for (const [x, y, r, a] of lobes) {
     const g = ctx.createRadialGradient(x, y, 1, x, y, r);
@@ -104,7 +104,7 @@ export class SprayPool {
   }
 
   /** Fan of powder kicked from a point. dir = horizontal throw direction. */
-  burst(p, dir, { count = 20, speed = 6, up = 3.5, spread = 0.8, size = 1.1, life = 0.8 } = {}) {
+  burst(p, dir, { count = 36, speed = 6, up = 3.5, spread = 0.8, size = 0.55, life = 0.8 } = {}) {
     for (let i = 0; i < count; i++) {
       const a = (Math.random() - 0.5) * spread * 2;
       const cos = Math.cos(a), sin = Math.sin(a);
@@ -145,7 +145,7 @@ export class SprayPool {
       // quick fade-in kills the pop, then a soft ease-out dissolve; the
       // grains billow outward as they die like settling powder
       const fadeIn = Math.min(1, age[i] / 0.07);
-      al[i] = Math.pow(1 - k, 1.2) * 0.9 * fadeIn;
+      al[i] = Math.pow(1 - k, 1.2) * fadeIn;
       sz[i] = size0[i] * (0.5 + k * 1.9);
     }
     this.aPos.needsUpdate = true;
