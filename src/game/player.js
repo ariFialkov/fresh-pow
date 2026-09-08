@@ -27,6 +27,7 @@ export class Player {
     this.pos = new THREE.Vector3();
     this.yaw = 0; // board/ski heading, 0 = straight downhill (-z)
     this.travelYaw = 0; // velocity direction — chases yaw at the edge's grip
+    this.edge = 0; // how loaded the carving edge is (ski/board steering state)
     this.latA = 0; // smoothed centripetal accel -> body lean
     this.slip = 0; // yaw - travelYaw: the drift angle
     this.speed = 0;
@@ -110,20 +111,45 @@ export class Player {
     if (this.stumbleT > 0) this.stumbleT -= dt;
     this.landComp = Math.max(0, this.landComp - dt * 2.6);
 
-    // ---- steering: the tip leads, the velocity follows ----
-    // yaw is where the board POINTS; travelYaw is where you actually GO.
-    // The gap between them is the drift angle — carving is travelYaw slowly
-    // being pulled around by the edge.
+    // ---- steering: three distinct feels ----
+    // Sleds: point-and-slide, loose and reactive (they have no edge).
+    // Ski/board: CARVING — steering loads an edge against the snow, and the
+    // loaded edge turns the heading at a RATE. The load-up lag is the
+    // resistance of snow being carved through; travel then hugs the heading
+    // (minimal slip), so the tip leads the arc instead of washing sideways.
     const steerIn = stumbling ? inp.steer * 0.25 : inp.steer;
-    const targetYaw = clamp(steerIn, -1, 1) * MAX_YAW;
-    this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.0 : 2.8), 0, 1));
+
+    if (this.isSled) {
+      const targetYaw = clamp(steerIn, -1, 1) * MAX_YAW;
+      this.yaw = lerp(this.yaw, targetYaw, clamp(dt * (this.airborne ? 1.0 : 2.8), 0, 1));
+    } else if (this.airborne) {
+      const targetYaw = clamp(steerIn, -1, 1) * MAX_YAW;
+      this.yaw = lerp(this.yaw, targetYaw, clamp(dt * 1.0, 0, 1));
+      this.edge = lerp(this.edge, clamp(steerIn, -1, 1), clamp(dt * 2, 0, 1));
+    } else {
+      // the edge takes a beat to bite before the gear comes around
+      this.edge = lerp(this.edge, clamp(steerIn, -1, 1), clamp(dt * 2.4, 0, 1));
+      const carveRate = this.edge * (1.0 + 1.1 * clamp(this.speed / 32, 0, 1.15));
+      this.yaw += carveRate * dt;
+      // gravity pulls the line back to the fall line — gently mid-carve,
+      // firmly once the edge is released
+      const centering = Math.abs(steerIn) < 0.12 ? 1.15 : 0.25;
+      this.yaw = lerp(this.yaw, 0, clamp(dt * centering, 0, 1));
+      this.yaw = clamp(this.yaw, -MAX_YAW, MAX_YAW);
+    }
 
     if (!this.airborne) {
-      // edge grip: strong at low speed, drifty at pace; braking and sleds
-      // break the edge loose further
-      let grip = 4.2 - 2.6 * clamp(this.speed / 40, 0, 1);
-      if (this.input.brake && !stumbling) grip *= 0.55;
-      if (this.isSled) grip *= 0.7;
+      // edge grip: a carving edge rails; braking breaks it loose from the
+      // center of the board (that slide is real); sleds are always loose
+      const braking = this.input.brake && !stumbling;
+      let grip;
+      if (this.isSled) {
+        grip = (4.2 - 2.6 * clamp(this.speed / 40, 0, 1)) * 0.7 * (braking ? 0.55 : 1);
+      } else if (braking) {
+        grip = 2.0;
+      } else {
+        grip = 8.5 - 2.2 * clamp(this.speed / 40, 0, 1);
+      }
       if (stumbling) grip *= 0.7;
       const prevTravel = this.travelYaw;
       this.travelYaw = lerp(this.travelYaw, this.yaw, clamp(dt * grip, 0, 1));
@@ -251,7 +277,9 @@ export class Player {
 
     // continuous powder: wake at speed, roost off the drifting edge
     if (this.fx && !this.airborne && this.speed > 7) {
-      const carve = Math.abs(this.slip) * 2.2 + (Math.abs(this.yaw) / MAX_YAW) * 0.4;
+      // a railing edge under load throws its own clean plume even with no
+      // slip; sliding (slip) and braking still roost the most
+      const carve = Math.abs(this.slip) * 2.2 + Math.abs(this.latA) / 11 + (Math.abs(this.yaw) / MAX_YAW) * 0.25;
       const braking = inp.brake && !stumbling ? 1 : 0;
       const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
       const rate = intensity * this.speed * 0.14;
