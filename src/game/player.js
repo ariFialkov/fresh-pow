@@ -99,14 +99,9 @@ export class Player {
       this.pos.set(nx, this.terrain.heightAt(nx, nz), nz);
       this.airborne = false;
       this._sync(dt);
-      const nf = this.terrain.normalAt(nx, nz);
-      const umf = Math.hypot(nf.x, nf.z);
       setPose(this.rider, {
         brake: this.speed > 1.5 ? 1 : 0,
         idle: this.speed <= 1.5,
-        upLat: umf > 1e-4
-          ? (-nf.x / umf * Math.cos(this.yaw) + -nf.z / umf * Math.sin(this.yaw)) * Math.min(1, umf * 6)
-          : 0,
         t: this.t,
         dt,
       });
@@ -350,21 +345,9 @@ export class Player {
     this._prevSpeed = this.speed;
     this.longA = lerp(this.longA ?? 0, clamp(rawLongA, -18, 12), clamp(dt * 7, 0, 1));
 
-    // where uphill really is, in the rider's heading frame — the pose engine
-    // uses it to dig the uphill edge and lean into the hill when braking
-    const nrm = t.normalAt(this.pos.x, this.pos.z);
-    const um = Math.hypot(nrm.x, nrm.z);
-    let upLat = 0;
-    if (um > 1e-4) {
-      const ux = -nrm.x / um, uz = -nrm.z / um;
-      const s = Math.min(1, um * 6); // flat ground has no meaningful uphill
-      upLat = (ux * Math.cos(this.yaw) + uz * Math.sin(this.yaw)) * s;
-    }
-
     setPose(this.rider, {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
-      upLat,
       // lean comes from the actual centripetal force of the carve
       steer: clamp(this.latA / 11, -1, 1),
       // weight shifts back over the tails as the edge drifts, forward in a tuck

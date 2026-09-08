@@ -220,17 +220,10 @@ export class Bot {
     }
 
     if (this.finished) {
-      // brake out after the line, then stand in the corral — digging the
-      // uphill edge like everyone else
-      const nb = this.terrain.normalAt(this.obj.position.x, this.obj.position.z);
-      const umb = Math.hypot(nb.x, nb.z);
-      const vy = this.visYaw || 0;
+      // brake out after the line, then stand in the corral
       setPose(this.rider, {
         brake: this.speed > 2 ? 1 : 0,
         idle: this.speed <= 2,
-        upLat: umb > 1e-4
-          ? (-nb.x / umb * Math.cos(vy) + -nb.z / umb * Math.sin(vy)) * Math.min(1, umb * 6)
-          : 0,
         t: this._t + this.weavePhase,
         dt,
       });

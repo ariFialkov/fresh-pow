@@ -101,7 +101,7 @@ function buildGear(gear) {
     g.add(base, deck, stripe);
     // bindings sit where the pose actually plants the boots (measured), with
     // the same duck angles the ankle comp applies: front open, back near flat
-    for (const [z, rot] of [[-0.35, -0.28], [0.35, 0.08]]) {
+    for (const [z, rot] of [[-0.35, 0.28], [0.35, -0.08]]) {
       const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.17, 0.05, 0.33)), darkMat);
       b.position.set(0, 0.065, z);
       b.rotation.y = rot;
@@ -302,8 +302,8 @@ export function createRider(gear, helmetColor) {
     ? null
     : isBoard
       ? {
-          [-1]: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: -0.28 }, // front foot, ducked open
-          1: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: 0.08 }, // back foot, near flat
+          1: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: 0.28 }, // front foot, ducked open
+          [-1]: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -0.08 }, // back foot, near flat
         }
       : {
           1: { pos: new THREE.Vector3(0.175, 0.2, 0.03), yaw: 0 },
@@ -487,7 +487,7 @@ function applySkeleton(rider) {
 
   // trailing-hand world position while the mitt is brushing the snow
   if ((rider.mittDrag ?? 0) > 0.05) {
-    const hb = ctl.joints['hand1']?.bone;
+    const hb = ctl.joints['hand-1']?.bone;
     if (hb) {
       if (!rider.mittWorld) rider.mittWorld = new THREE.Vector3();
       hb.getWorldPosition(rider.mittWorld);
@@ -522,7 +522,6 @@ export function setPose(rider, p = {}) {
   S.shift = ease(S.shift, p.shift ?? 0, 4.5); // fore/aft weight over the deck
   S.twist = ease(S.twist, p.twist ?? 0, 8); // spin rate while tricking
   S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
-  S.upLat = ease(S.upLat ?? 0, p.upLat ?? 0, 5); // where uphill is, rider frame (+ = rig right)
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
   const twist = S.twist;
@@ -579,28 +578,23 @@ export function setPose(rider, p = {}) {
   const pump = !idle && !airborne ? Math.sin(t * 4.5) * 0.04 * speed : 0;
 
   // hockey-stop: gear and body swing perpendicular together, smoothly.
-  // The check always digs the UPHILL edge — whichever edge sits higher on
-  // the real slope stops the rider — so the swing side comes from the
-  // terrain, not the steer; on dead-flat fall line it goes either way.
+  // The brake edge follows the INPUT, latched at the press (regular
+  // stance): steering left = heelside check, steering right = toeside
+  // check, no steer = either at random.
   if ((p.brake ?? 0) > 0 && !rider._wasBraking) {
-    rider._brakeSide = Math.abs(S.upLat) > 0.12
-      ? (S.upLat > 0 ? 1 : -1)
-      : Math.abs(steer) > 0.05
-        ? (steer < 0 ? -1 : 1)
-        : (Math.random() < 0.5 ? -1 : 1);
+    const rnd = Math.random() < 0.5 ? -1 : 1;
+    rider._brakeSide = Math.abs(steer) > 0.05 ? (steer < 0 ? -1 : 1) : rnd;
+    rider._edgeLean = Math.abs(steer) > 0.05 ? (steer < 0 ? -1 : 1) : rnd;
   }
   rider._wasBraking = (p.brake ?? 0) > 0;
   const bk = rider._brakeSmooth += ((idle || airborne ? 0 : brake) - rider._brakeSmooth) * Math.min(1, dt * 6);
   const bkYaw = rider._brakeSide * bk;
 
-  // whole-body edge angle into the turn; braking leans the body INTO the
-  // hill (toward real uphill, tracking the terrain as it curves under the
-  // rider) instead of wherever the local steer happened to point; knocked
-  // riders lie on their side
-  // (+z Euler roll tips the body toward -x, so leaning toward uphill at
-  // +x needs a NEGATIVE roll — the sign that reads wrong at first glance)
-  const hillLean = isSled ? 0 : -bk * S.upLat * 0.42;
-  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) * (1 - bk * 0.6) + hillLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
+  // whole-body edge angle into the turn; braking leans the body over the
+  // chosen edge (+z Euler roll tips the body toward -x, the toe side of the
+  // regular stance); knocked riders lie on their side
+  const brakeLean = isSled ? 0 : bk * (rider._edgeLean ?? 1) * 0.42;
+  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) * (1 - bk * 0.6) + brakeLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
     // skis pivot across the slope to scrub; the board instead noses INTO the
@@ -611,7 +605,7 @@ export function setPose(rider, p = {}) {
       // looked fake. Counter-roll the board so it glides flat on the snow,
       // keeping only a slight edge tilt into the carve; a brake check digs
       // the deck onto its UPHILL edge (deck top tips away from the hill)
-      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - hillLean + bk * S.upLat * 0.22 - swayB * 0.3, 7, 0.6);
+      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - brakeLean - bk * (rider._edgeLean ?? 1) * 0.22 - swayB * 0.3, 7, 0.6);
     }
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
@@ -680,9 +674,9 @@ export function setPose(rider, p = {}) {
   // ---- standing riders (ski / board) ----
   // deep frontside carve: the whole body sinks and the trailing mitt reaches
   // down to brush the snow (race scene reads mittDrag + mittWorld for spray)
-  // (goofy stance: toeside is a LEFT turn, steer < 0)
+  // (regular stance: toeside is a RIGHT turn, steer > 0)
   const fsDrag = isBoard && !idle
-    ? Math.max(0, (-steer - 0.45) / 0.55) * (1 - air) * (1 - tuck) * (1 - knocked)
+    ? Math.max(0, (steer - 0.45) / 0.55) * (1 - air) * (1 - tuck) * (1 - knocked)
     : 0;
   rider.mittDrag = fsDrag;
 
@@ -709,8 +703,8 @@ export function setPose(rider, p = {}) {
   // toward the fall line (that laid-back backside look); ski hips swing
   // gently into every turn.
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8)
-    + (isBoard ? Math.max(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
-    + (isBoard ? 0.5 * tuck : 0); // a tucked boarder squares up toward travel to fold low over the nose
+    + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
+    + (isBoard ? -0.5 * tuck : 0); // a tucked boarder squares up toward travel to fold low over the nose
   RY(parts.pelvis, pelvisYaw, 7, 0.7);
   // aero tuck: the fold happens in applySkeleton as a WORLD-frame rotation
   // about the rig's lateral axis (hips + spine chain), because the spine
@@ -721,7 +715,7 @@ export function setPose(rider, p = {}) {
   const spineGround = idle
     ? 0.05 + breathe * 0.015
     : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.15 : 0.45) - brake * 0.22 + knocked * 0.5 + shift * 0.22
-      + (isBoard ? -Math.max(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (right turn, goofy): lean back casual
+      + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (left turn): lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
@@ -785,7 +779,7 @@ export function setPose(rider, p = {}) {
       sz = mix(arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45, arm.side * 0.15, tuck);
       ex = mix(0.5 + inside * 0.55 + swayB * 0.35, 0.18, tuck);
       wx = arm.side * steer * 0.2;
-      if (arm.side > 0 && fsDrag > 0) { // goofy: the trailing mitt is the right hand
+      if (arm.side < 0 && fsDrag > 0) { // regular: the trailing mitt is the left hand
         // trailing mitt drops toward the snow on the toeside lean
         sx = mix(sx, 0.5, fsDrag);
         sz = mix(sz, -1.45, fsDrag);
