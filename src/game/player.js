@@ -7,7 +7,7 @@ import { clamp, lerp } from './rng.js';
 
 const G = 12.5; // arcade gravity along the slope
 const AIR_G = 18;
-const DRAG_K = 0.0031; // terminal ~ sqrt(G*grade/K)
+const DRAG_K = 0.0046; // terminal ~ sqrt(G*grade/K) — deep snow, not boilerplate ice
 const TUCK_DRAG = 0.55;
 const BRAKE_DECEL = 14;
 const MAX_YAW = 1.15; // radians away from straight downhill
@@ -24,6 +24,7 @@ export class Player {
     this.obj = this.rider.root;
 
     this.isSled = gear.type === 'sled';
+    this.isBoard = gear.type === 'board';
     this.pos = new THREE.Vector3();
     this.yaw = 0; // board/ski heading, 0 = straight downhill (-z)
     this.travelYaw = 0; // velocity direction — chases yaw at the edge's grip
@@ -195,6 +196,9 @@ export class Player {
       this._wasBraking = braking;
       // the drifting edge scrubs speed — sideways is slow
       a -= Math.abs(this.slip) * this.speed * 0.055;
+      // and a LOADED edge carves a trench: railing through a turn bleeds
+      // speed into the snow it displaces (boards dig the deepest)
+      if (!this.isSled) a -= Math.abs(this.edge) * this.speed * (this.isBoard ? 0.058 : 0.046);
 
       this.speed = Math.max(0, this.speed + a * dt);
 
