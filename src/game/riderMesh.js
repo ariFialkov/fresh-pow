@@ -68,40 +68,41 @@ function buildGear(gear) {
   const baseMat = mat(0x14171d); // near-black base so decks pop off the snow
 
   if (gear.type === 'ski') {
-    for (const side of [-0.1, 0.1]) {
-      const base = mesh(capsule('skibase', 0.062, 1.52), baseMat);
+    for (const side of [-0.175, 0.175]) {
+      const base = mesh(capsule('skibase', 0.075, 1.74), baseMat);
       base.rotation.x = Math.PI / 2;
       base.scale.set(1, 1, 0.16);
       base.position.set(side, 0.008, 0.05);
-      const ski = mesh(capsule('ski', 0.055, 1.5), deckMat);
+      const ski = mesh(capsule('ski', 0.068, 1.72), deckMat);
       ski.rotation.x = Math.PI / 2;
       ski.scale.set(1, 1, 0.22);
-      ski.position.set(side, 0.022, 0.05);
-      const tip = mesh(capsule('skitip', 0.05, 0.16), accentMat);
+      ski.position.set(side, 0.024, 0.05);
+      const tip = mesh(capsule('skitip', 0.062, 0.18), accentMat);
       tip.rotation.x = Math.PI / 2 - 0.55;
       tip.scale.set(0.95, 1, 0.3);
-      tip.position.set(side, 0.07, -0.82);
-      const binding = mesh(cached('bind', () => new THREE.BoxGeometry(0.1, 0.07, 0.3)), darkMat);
+      tip.position.set(side, 0.078, -0.94);
+      const binding = mesh(cached('bind', () => new THREE.BoxGeometry(0.13, 0.08, 0.36)), darkMat);
       binding.position.set(side, 0.05, 0.05);
       g.add(base, ski, tip, binding);
     }
   } else if (gear.type === 'board') {
-    const base = mesh(capsule('boardbase', 0.168, 1.17), baseMat);
+    const base = mesh(capsule('boardbase', 0.168, 1.32), baseMat);
     base.rotation.x = Math.PI / 2;
     base.scale.set(1, 1, 0.1);
     base.position.y = 0.02;
-    const deck = mesh(capsule('board', 0.155, 1.15), deckMat);
+    const deck = mesh(capsule('board', 0.155, 1.3), deckMat);
     deck.rotation.x = Math.PI / 2;
     deck.scale.set(1, 1, 0.14);
     deck.position.y = 0.035;
-    const stripe = mesh(capsule('bstripe', 0.1, 1.0), accentMat);
+    const stripe = mesh(capsule('bstripe', 0.1, 1.14), accentMat);
     stripe.rotation.x = Math.PI / 2;
     stripe.scale.set(1, 1, 0.12);
     stripe.position.y = 0.048;
     g.add(base, deck, stripe);
-    // bindings sit where the pose actually plants the boots
-    for (const [z, rot] of [[-0.24, -0.3], [0.24, -0.3]]) {
-      const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.13, 0.05, 0.3)), darkMat);
+    // bindings sit where the pose actually plants the boots (measured), with
+    // the same duck angles the ankle comp applies: front open, back near flat
+    for (const [z, rot] of [[-0.35, 0.28], [0.35, -0.08]]) {
+      const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.14, 0.05, 0.33)), darkMat);
       b.position.set(0, 0.065, z);
       b.rotation.y = rot;
       g.add(b);
@@ -277,8 +278,11 @@ export function createRider(gear, helmetColor) {
   const rider = {
     root, rig, gearGroup, parts, shadow, char, ctl,
     isSled, isBoard, type: gear.type,
-    baseBodyYaw: isBoard ? 0.6 : 0,
-    gearYawBase: isBoard ? 0.29 : 0,
+    isSaucer: gear.id === 'sled-saucer',
+    // sideways stance: the feet straddle line sits perpendicular to the
+    // pelvis facing, so yaw = PI/2 - boardYaw lines it up with the deck
+    baseBodyYaw: isBoard ? Math.PI / 2 - 0.22 : 0,
+    gearYawBase: isBoard ? 0.22 : 0,
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
@@ -311,9 +315,10 @@ function applySkeleton(rider) {
 
   const pel = P.pelvis;
   setJoint(ctl, 'hips', pel.rotation.x, pel.rotation.y, pel.rotation.z);
+  const dx = -pel.position.x / MODEL_SCALE;
   const dy = (pel.position.y - STAND_Y) / MODEL_SCALE;
   const dz = -pel.position.z / MODEL_SCALE;
-  _av.set(0, dy, dz).applyQuaternion(ctl.hipsParentInv);
+  _av.set(dx, dy, dz).applyQuaternion(ctl.hipsParentInv);
   ctl.joints.hips.bone.position.copy(ctl.hipsRestPos).add(_av);
 
   // the torso fold spreads across the model's three spine bones
@@ -335,7 +340,7 @@ function applySkeleton(rider) {
     const s = leg.side;
     setJoint(ctl, 'upleg' + s, leg.hip.rotation.x, leg.hip.rotation.y, leg.hip.rotation.z);
     setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
-    setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, 0);
+    setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, leg.ankle.rotation.z);
   }
 }
 
@@ -381,26 +386,27 @@ export function setPose(rider, p = {}) {
   // "reacting to the mountain" from "leaning on cue". ----
   const spr = (g, axis, target, om, zt) => {
     let sv = g.userData._sv;
-    if (!sv) sv = g.userData._sv = { x: 0, y: 0, z: 0, py: 0, pz: 0 };
-    const cur = axis === 'py' ? g.position.y : axis === 'pz' ? g.position.z : g.rotation[axis];
+    if (!sv) sv = g.userData._sv = { x: 0, y: 0, z: 0, px: 0, py: 0, pz: 0 };
+    const isPos = axis[0] === 'p';
+    const pAxis = axis[1];
+    const cur = isPos ? g.position[pAxis] : g.rotation[axis];
     if (dt > 0.2) {
       // init/convergence call — snap, no dynamics
       sv[axis] = 0;
-      if (axis === 'py') g.position.y = target;
-      else if (axis === 'pz') g.position.z = target;
+      if (isPos) g.position[pAxis] = target;
       else g.rotation[axis] = target;
       return;
     }
     const acc = om * om * (target - cur) - 2 * zt * om * sv[axis];
     sv[axis] += acc * dt;
     const nv = cur + sv[axis] * dt;
-    if (axis === 'py') g.position.y = nv;
-    else if (axis === 'pz') g.position.z = nv;
+    if (isPos) g.position[pAxis] = nv;
     else g.rotation[axis] = nv;
   };
   const RX = (g, v, om = 13, zt = 0.85) => spr(g, 'x', v, om, zt);
   const RY = (g, v, om = 13, zt = 0.85) => spr(g, 'y', v, om, zt);
   const RZ = (g, v, om = 13, zt = 0.85) => spr(g, 'z', v, om, zt);
+  const PX = (g, v, om = 14, zt = 0.9) => spr(g, 'px', v, om, zt);
   const PY = (g, v, om = 14, zt = 0.9) => spr(g, 'py', v, om, zt);
   const PZ = (g, v, om = 9, zt = 0.7) => spr(g, 'pz', v, om, zt);
 
@@ -436,6 +442,34 @@ export function setPose(rider, p = {}) {
     RY(rider.gearGroup, bkYaw * 0.25);
   }
 
+  if (isSled && rider.isSaucer) {
+    // tube ride: kneeling in the dish — shins along the bottom, toes pointed
+    // back past the rim, butt near the heels, hands down on the handles
+    PY(parts.pelvis, 0.58 - knocked * 0.18);
+    RY(parts.pelvis, bkYaw * 0.25);
+    const spx = 0.3 + brake * -0.35 + tuck * 0.25 + wobS + longG * -0.3 + swayB * 0.5 + knocked * 0.4;
+    RX(parts.spine, spx, 9, 0.65);
+    RZ(parts.spine, -steer * 0.3 + swayA, 9, 0.65);
+    RX(parts.chest, 0.12 + brake * -0.12 + tuck * 0.15 + longG * -0.2, 8.5, 0.6);
+    RX(parts.neck, -(spx + 0.15) * 0.75 + longG * 0.25, 7, 0.5);
+    RZ(parts.neck, steer * 0.22 + swayA * 0.8, 7, 0.5);
+    for (const leg of parts.legs) {
+      RX(leg.hip, 0.3 + breathe * 0.02); // thigh near vertical, a hint forward
+      RZ(leg.hip, leg.side * 0.14); // knees spread toward the rim
+      RX(leg.knee, -2.25); // deep fold: shin back along the dish
+      RX(leg.ankle, 0.85); // toes pointed behind
+      RY(leg.ankle, 0);
+      RZ(leg.ankle, 0);
+    }
+    for (const arm of parts.arms) {
+      RX(arm.shoulder, -0.6 + brake * 0.4 + air * -0.55 + wobA + longG * -0.45 + swayA * arm.side + knocked * 0.8, 8, 0.5);
+      RZ(arm.shoulder, arm.side * (-0.22 + jolt * 0.5 + knocked * 0.9), 8, 0.5);
+      RX(arm.elbow, 0.4 + brake * 0.4, 9, 0.55);
+      RX(arm.wrist, -0.3, 7, 0.45);
+    }
+    applySkeleton(rider);
+    return;
+  }
   if (isSled) {
     PY(parts.pelvis, 0.5 - knocked * 0.1); // seat height: butt on the deck, legs clear of it
     RY(parts.pelvis, bkYaw * 0.25);
@@ -464,26 +498,33 @@ export function setPose(rider, p = {}) {
   // ---- standing riders (ski / board) ----
   // ground and air stances blend continuously through S.air
   const kneeGround = idle
-    ? 0.18 + breathe * 0.03
+    ? (isBoard ? 0.34 : 0.18) + breathe * 0.03
     : 0.55 + tuck * 0.6 + crouch * 0.85 + brake * 0.25 + knocked * 0.9;
   const kneeBend = kneeGround * (1 - air) + (1.05 + crouch * 0.2 + curl * 0.55 + Math.abs(twist) * 0.3) * air;
 
-  // per-leg chain angles; board legs split fore/aft to reach the bindings
+  // per-leg chain angles. The board pelvis rides yawed nearly across the
+  // deck, so its feet straddle the board line by thigh ab/adduction in the
+  // pelvis frame; ski legs stay square and only stagger with the skate pump.
   let legVSum = 0;
   const legAngles = [];
   for (const leg of parts.legs) {
-    const split = isBoard ? (leg.index === 0 ? 0.42 : -0.36) : 0;
+    // the yawed pelvis already fore/afts the wide hip sockets; abduction
+    // widens that split along the board rather than fighting it
+    const ab = isBoard ? leg.side * 0.32 : 0;
     const stag = !isBoard ? (leg.index === 0 ? 1 : -1) * pump * 0.5 : 0;
-    const a = kneeBend * 0.8 + split * 0.5 + stag; // thigh from vertical
-    const b = kneeBend * 1.65 + Math.abs(split) * 0.4 + stag * 0.4; // knee fold
-    legAngles.push({ a, b });
-    legVSum += THIGH_L * Math.cos(a) + CALF_L * Math.cos(b - a);
+    const a = kneeBend * 0.8 + stag; // thigh from vertical
+    const b = kneeBend * 1.65 + Math.abs(ab) * 0.35 + stag * 0.4; // knee fold
+    legAngles.push({ a, b, ab });
+    legVSum += (THIGH_L * Math.cos(a) + CALF_L * Math.cos(b - a)) * Math.cos(ab * 0.8);
   }
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
-  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.07 : 0) - air * 0.12 - knocked * 0.35);
-  // center of gravity slides fore/aft over the deck with the weight shift
+  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.03 : 0) - air * 0.12 - knocked * 0.35);
+  // center of gravity slides fore/aft over the deck with the weight shift;
+  // the yawed board pelvis also re-centers laterally so the feet straddle
+  // lands on the deck line (the leg fold drifts the feet sideways with yaw)
   PZ(parts.pelvis, -shift * 0.11);
+  PX(parts.pelvis, isBoard ? -0.19 : 0);
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8);
   RY(parts.pelvis, pelvisYaw, 11, 0.75);
 
@@ -495,22 +536,28 @@ export function setPose(rider, p = {}) {
   // counter-rotates against the hips through carves for that wound-up look
   RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 + swayB * 0.4, 9, 0.65);
   RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
-  RY(parts.spine, -pelvisYaw * 0.25 + steer * 0.18 + twist * 0.35 * air, 9, 0.65);
+  // boarders keep their shoulders with the board (only the head opens
+  // downhill); skiers square the torso back toward the fall line
+  RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * 0.18 + twist * 0.35 * air, 9, 0.65);
   RX(parts.chest, spineBase * 0.55 + tuck * 0.35 + wobS * 0.5 + longG * -0.22, 8.5, 0.6);
   RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
-  RY(parts.chest, -pelvisYaw * 0.3 + steer * 0.14 + twist * 0.5 * air, 8.5, 0.6);
+  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * 0.14 + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
   RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 + longG * 0.3, 6.5, 0.48);
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
-  RY(parts.neck, -pelvisYaw * 0.45 - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
+  RY(parts.neck, -pelvisYaw * (isBoard ? 0.72 : 0.45) - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
 
   for (const [i, leg] of parts.legs.entries()) {
-    const { a, b } = legAngles[i];
+    const { a, b, ab } = legAngles[i];
     RX(leg.hip, a, 14, 0.9);
+    RZ(leg.hip, ab, 14, 0.9);
     RX(leg.knee, -b, 14, 0.9);
     RX(leg.ankle, b - a, 16, 0.95); // levels the boot on the deck
-    // boots stay bound to the deck line whatever the hips do
-    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y, 16, 0.95);
+    RZ(leg.ankle, -ab, 16, 0.95); // and counter-rolls it flat under the straddle
+    // boots stay bound to the deck line whatever the hips do; board boots
+    // pick up duck-ish binding angles (front foot open, back foot near zero)
+    const bindAngle = isBoard ? (leg.index === 0 ? 0.28 : -0.08) : 0;
+    RY(leg.ankle, -pelvisYaw + rider.gearGroup.rotation.y + bindAngle, 16, 0.95);
   }
 
   // ---- pole plants: entering a carve, the inside arm punches forward and
