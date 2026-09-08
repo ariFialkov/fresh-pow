@@ -184,7 +184,10 @@ export class Trail {
     const idx = [];
     for (let i = 0; i < max - 1; i++) {
       const a = i * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      // wound so the faces look UP — the track is pressed into the snow's
+      // top surface and must render from above (it was flipped, and only
+      // ever visible from underneath)
+      idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
     }
     geo.setIndex(idx);
     geo.setDrawRange(0, 0);
