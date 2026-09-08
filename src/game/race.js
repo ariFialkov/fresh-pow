@@ -47,7 +47,7 @@ export class RaceScene {
     // spray matches this mountain's snow tone, lifted toward white the way
     // airborne powder catches the light
     const sprayCol = new THREE.Color(this.terrain.theme.snow).lerp(new THREE.Color(1, 1, 1), 0.75);
-    this.fx = new SprayPool(this.scene, 3200, { color: [sprayCol.r, sprayCol.g, sprayCol.b] });
+    this.fx = new SprayPool(this.scene, 5000, { color: [sprayCol.r, sprayCol.g, sprayCol.b] });
     this.pyro = new SprayPool(this.scene, 320, { color: [1, 0.7, 0.3], blending: THREE.AdditiveBlending, gravity: 5 });
     this.gate = new StartGate(this.terrain);
     this.scene.add(this.gate.group);
@@ -240,7 +240,7 @@ export class RaceScene {
       } else if (p.speed > b.speed + 1.5) {
         b.knockDown();
         this.hud.trickToast('BOOM!', `you took out ${b.identity.name}`);
-        this.fx.burst(b.obj.position, { x: 0, z: -1 }, { count: 62, speed: 5, up: 4, spread: 2.4, size: 0.48 });
+        this.fx.burst(b.obj.position, { x: 0, z: -1 }, { count: 100, speed: 5, up: 4, spread: 2.4, size: 0.28 });
         p.speed *= 0.9; // shoulder check isn't free
       } else {
         // trading paint at matched speed — both wobble apart

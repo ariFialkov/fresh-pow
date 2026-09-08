@@ -192,7 +192,7 @@ export class Player {
       if (braking && !this._wasBraking && this.fx && this.speed > 8) {
         const side = Math.sign(inp.steer) || 1;
         this.fx.burst(this.pos, { x: side * -dir.z, z: side * dir.x }, {
-          count: 80, speed: 5, up: 3, spread: 1.1, size: 0.42,
+          count: 130, speed: 5, up: 3, spread: 1.1, size: 0.24,
         });
       }
       this._wasBraking = braking;
@@ -258,11 +258,11 @@ export class Player {
         this.landComp = 0.4 + impact * 0.6;
         if (this.fx) {
           this.fx.burst(this.pos, dir, {
-            count: 20 + Math.round(impact * 48),
+            count: 32 + Math.round(impact * 80),
             speed: 3 + impact * 6,
             up: 2.5 + impact * 3,
             spread: 1.4,
-            size: 0.48,
+            size: 0.28,
           });
         }
         if (sloppy) {
@@ -289,7 +289,7 @@ export class Player {
       const braking = inp.brake && !stumbling ? 1 : 0;
       const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
       // finer grains, more of them: a mist rather than a few big puffs
-      const rate = intensity * this.speed * 0.55;
+      const rate = intensity * this.speed * 0.9;
       this._sprayAcc = (this._sprayAcc || 0) + rate * dt * 60;
       const side = Math.sign(this.yaw) || (Math.random() < 0.5 ? -1 : 1);
       while (this._sprayAcc >= 1) {
@@ -302,7 +302,7 @@ export class Player {
           -dir.x * 2 + side * -dir.z * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
           1.2 + carve * 2 + braking * 2.5 + Math.random() * 1.5,
           -dir.z * 2 + side * dir.x * (1.5 + carve * 4 + braking * 5) + (Math.random() - 0.5) * 2,
-          0.26 + carve * 0.18 + braking * 0.26,
+          0.15 + carve * 0.1 + braking * 0.15,
           0.5 + Math.random() * 0.4
         );
       }
@@ -312,7 +312,7 @@ export class Player {
     // its own thin feather of spray behind the hand
     const mitt = this.rider.mittDrag ?? 0;
     if (this.fx && !this.airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8) {
-      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.16 * dt * 60;
+      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.26 * dt * 60;
       const mw = this.rider.mittWorld;
       while (this._mittAcc >= 1) {
         this._mittAcc -= 1;
@@ -323,7 +323,7 @@ export class Player {
           -dir.x * 1.5 + (Math.random() - 0.5) * 0.8,
           0.6 + Math.random() * 0.7,
           -dir.z * 1.5 + (Math.random() - 0.5) * 0.8,
-          0.17 + Math.random() * 0.08,
+          0.1 + Math.random() * 0.05,
           0.3 + Math.random() * 0.25
         );
       }
@@ -374,7 +374,7 @@ export class Player {
     if (this.hud) this.hud.stumbleFlash(`taken out by ${byName}!`);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.fx.burst(this.pos, dir, { count: 80, speed: 6, up: 4.5, spread: 2.6, size: 0.5 });
+      this.fx.burst(this.pos, dir, { count: 130, speed: 6, up: 4.5, spread: 2.6, size: 0.28 });
     }
   }
 
@@ -402,7 +402,7 @@ export class Player {
     if (this.hud) this.hud.stumbleFlash(reason);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.fx.burst(this.pos, dir, { count: 62, speed: 5, up: 4, spread: 2.2, size: 0.48 });
+      this.fx.burst(this.pos, dir, { count: 100, speed: 5, up: 4, spread: 2.2, size: 0.28 });
     }
   }
 

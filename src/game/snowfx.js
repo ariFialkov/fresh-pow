@@ -73,7 +73,7 @@ export class SprayPool {
           vA = aAlpha;
           vS = aShade;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aSize * (240.0 / max(1.0, -mv.z));
+          gl_PointSize = max(1.5, aSize * (240.0 / max(1.0, -mv.z)));
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
@@ -104,7 +104,7 @@ export class SprayPool {
   }
 
   /** Fan of powder kicked from a point. dir = horizontal throw direction. */
-  burst(p, dir, { count = 36, speed = 6, up = 3.5, spread = 0.8, size = 0.55, life = 0.8 } = {}) {
+  burst(p, dir, { count = 60, speed = 6, up = 3.5, spread = 0.8, size = 0.32, life = 0.8 } = {}) {
     for (let i = 0; i < count; i++) {
       const a = (Math.random() - 0.5) * spread * 2;
       const cos = Math.cos(a), sin = Math.sin(a);

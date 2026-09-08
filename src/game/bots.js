@@ -244,7 +244,7 @@ export class Bot {
     // powder off the carves (cheaper budget than the player's spray)
     if (race.fx && !airborne && this.speed > 10) {
       const edge = Math.abs(lean);
-      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.2 * dt * 60;
+      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.32 * dt * 60;
       const side = Math.sign(lean) || 1;
       while (this._sprayAcc >= 1) {
         this._sprayAcc -= 1;
@@ -253,7 +253,7 @@ export class Bot {
           side * (1 + edge * 3.5) + (Math.random() - 0.5) * 2,
           1 + edge * 2 + Math.random() * 1.2,
           2 + (Math.random() - 0.5) * 2,
-          0.2 + edge * 0.16,
+          0.12 + edge * 0.09,
           0.45 + Math.random() * 0.35
         );
       }
@@ -261,14 +261,14 @@ export class Bot {
     // boarder bots brushing a mitt through a deep frontside carve
     const mitt = this.rider.mittDrag ?? 0;
     if (race.fx && !airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8) {
-      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.09 * dt * 60;
+      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.15 * dt * 60;
       const mw = this.rider.mittWorld;
       while (this._mittAcc >= 1) {
         this._mittAcc -= 1;
         race.fx.spawn(
           mw.x + (Math.random() - 0.5) * 0.12, mw.y - 0.05, mw.z + (Math.random() - 0.5) * 0.12,
           (Math.random() - 0.5) * 0.8, 0.6 + Math.random() * 0.7, 1.2 + (Math.random() - 0.5) * 0.8,
-          0.17 + Math.random() * 0.08,
+          0.1 + Math.random() * 0.05,
           0.3 + Math.random() * 0.25
         );
       }
