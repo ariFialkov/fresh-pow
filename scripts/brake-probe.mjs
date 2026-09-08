@@ -14,7 +14,7 @@ for (const off of [28, -28]) {
     const r = window.__fp.race, s = 430;
     const x = r.terrain.centerAt(s) + o;
     r.player.pos.set(x, r.terrain.heightAt(x, -s), -s);
-    r.player.speed = 16; r.player.airborne = false; r.player.vy = 0; r.player.yaw = 0; r.player.travelYaw = 0;
+    r.player.speed = 16; r.player.airborne = false; r.player.vy = 0; r.player.yaw = o > 0 ? 0.95 : -0.95; r.player.travelYaw = r.player.yaw;
   }, off);
   await page.keyboard.down('s');
   const t0 = await page.evaluate(() => window.__fp.race.player.t);

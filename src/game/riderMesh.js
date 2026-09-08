@@ -597,7 +597,9 @@ export function setPose(rider, p = {}) {
   // hill (toward real uphill, tracking the terrain as it curves under the
   // rider) instead of wherever the local steer happened to point; knocked
   // riders lie on their side
-  const hillLean = isSled ? 0 : bk * S.upLat * 0.42;
+  // (+z Euler roll tips the body toward -x, so leaning toward uphill at
+  // +x needs a NEGATIVE roll — the sign that reads wrong at first glance)
+  const hillLean = isSled ? 0 : -bk * S.upLat * 0.42;
   RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) * (1 - bk * 0.6) + hillLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
@@ -609,7 +611,7 @@ export function setPose(rider, p = {}) {
       // looked fake. Counter-roll the board so it glides flat on the snow,
       // keeping only a slight edge tilt into the carve; a brake check digs
       // the deck onto its UPHILL edge (deck top tips away from the hill)
-      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - hillLean - bk * S.upLat * 0.22 - swayB * 0.3, 7, 0.6);
+      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - hillLean + bk * S.upLat * 0.22 - swayB * 0.3, 7, 0.6);
     }
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
