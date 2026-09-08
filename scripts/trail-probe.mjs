@@ -57,9 +57,29 @@ const info = await page.evaluate(() => {
 });
 console.log('trail state:', JSON.stringify(info, null, 1));
 
-// what the player actually sees: the untouched chase camera, right after carving
+// what the player actually sees: the untouched chase camera, grounded
+await page.waitForFunction(() => !window.__fp.race.player.airborne, undefined, { timeout: 60000 });
 await page.screenshot({ path: 'scratch-trail-chase.png' });
 console.log('shot chase');
+
+// close-up on the gear's tail at LOW speed: verifies the ribbon hugs the
+// snow and pours continuously out of the vehicle
+await page.keyboard.down('s');
+await page.waitForFunction(() => window.__fp.race.player.speed < 8 && !window.__fp.race.player.airborne, undefined, { timeout: 60000 });
+await page.keyboard.up('s');
+await page.evaluate(() => {
+  const r = window.__fp.race;
+  const orig = r.update.bind(r);
+  r.update = (dt) => {
+    orig(dt);
+    const p = r.player.pos;
+    r.camera.position.set(p.x + 2.6, p.y + 1.6, p.z - 2.4);
+    r.camera.lookAt(p.x, p.y + 0.2, p.z + 1.6);
+  };
+});
+await page.waitForTimeout(1400);
+await page.screenshot({ path: 'scratch-trail-close.png' });
+console.log('shot close');
 
 // bird's-eye: hover above the player looking straight down the back-trail
 await page.evaluate(() => {

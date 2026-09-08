@@ -140,23 +140,28 @@ export class SprayPool {
  */
 export class GearTrails {
   constructor(scene, terrain, gear) {
+    // off = lateral offset, tail = how far behind the rider the line leaves
+    // the gear (board tail, ski tails, sled stern) so the track visibly
+    // pours out of the vehicle instead of appearing underneath the body
     const specs =
       gear.type === 'ski'
-        ? [{ off: -0.11, w: 0.055 }, { off: 0.11, w: 0.055 }]
+        ? [{ off: -0.175, w: 0.065, tail: 0.8 }, { off: 0.175, w: 0.065, tail: 0.8 }]
         : gear.type === 'board'
-          ? [{ off: 0, w: 0.16 }]
+          ? [{ off: 0, w: 0.16, tail: 0.62 }]
           : gear.id === 'sled-saucer'
-            ? [{ off: 0, w: 0.36 }]
-            : [{ off: -0.21, w: 0.045 }, { off: 0.21, w: 0.045 }];
-    this.tracks = specs.map((s) => ({ off: s.off, trail: new Trail(scene, terrain, s.w) }));
+            ? [{ off: 0, w: 0.36, tail: 0.6 }]
+            : [{ off: -0.21, w: 0.045, tail: 0.75 }, { off: 0.21, w: 0.045, tail: 0.75 }];
+    this.tracks = specs.map((s) => ({ off: s.off, tail: s.tail, trail: new Trail(scene, terrain, s.w) }));
   }
 
   /** yaw = the vehicle's heading (rotation convention: forward = -z at 0). */
   push(x, z, yaw, grounded) {
     const rx = Math.cos(yaw);
     const rz = Math.sin(yaw);
+    const bx = -Math.sin(yaw); // unit vector pointing behind the gear
+    const bz = Math.cos(yaw);
     for (const t of this.tracks) {
-      t.trail.push(x + rx * t.off, z + rz * t.off, grounded);
+      t.trail.push(x + rx * t.off + bx * t.tail, z + rz * t.off + bz * t.tail, grounded);
     }
   }
 
@@ -195,33 +200,44 @@ export class Trail {
 
     this.mesh = new THREE.Mesh(
       geo,
-      // Lambert so the pressed track shades with the same light as the snow
+      // Lambert so the pressed track shades with the same light as the snow.
+      // The heavy polygon offset lets the ribbon hug the surface tightly
+      // (tiny lift) and still win the depth fight against the snow mesh
+      // where its linear interpolation rises above the analytic curve.
       new THREE.MeshLambertMaterial({
         vertexColors: true,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
       })
     );
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
 
-    this.trackCol = new THREE.Color(0x93aecd); // pressed snow, deeper groove
-    this.snowCol = new THREE.Color(0xf2f7fd);
+    // pressed track = this mountain's own snow with the darkness turned up
+    // ~25%; it ages back to pure snow color, melting into the slope
+    const snow = new THREE.Color(terrain.theme?.snow ?? 0xf2f7fd);
+    this.trackCol = snow.clone().multiplyScalar(0.75);
+    this.snowCol = snow;
     this.fadeTime = 15; // tracks linger well behind the pack
-    this.minDist = 0.9; // dense sampling keeps thin lines smooth through carves
+    this.minDist = 0.55; // dense sampling keeps thin lines smooth through carves
+    this.head = null; // live point pinned to the gear's tail every frame
   }
 
   push(x, z, grounded) {
     if (!grounded) {
       // break the ribbon over jumps
       if (this.points.length && this.points[this.points.length - 1] !== null) this.points.push(null);
+      this.head = null;
       return;
     }
+    // the head follows the vehicle continuously so the ribbon pours out of
+    // the gear instead of popping forward in minDist-sized chunks
+    this.head = { x, z, age: 0 };
     const last = [...this.points].reverse().find((p) => p);
     if (last && Math.hypot(x - last.x, z - last.z) < this.minDist) return;
     this.points.push({ x, z, age: 0 });
-    while (this.points.length > this.max) this.points.shift();
+    while (this.points.length > this.max - 1) this.points.shift();
   }
 
   update(dt) {
@@ -230,19 +246,28 @@ export class Trail {
     while (pts.length && pts[0] && pts[0].age > this.fadeTime) pts.shift();
     while (pts.length && pts[0] === null) pts.shift();
 
+    // the live head joins the sampled points so the ribbon's leading edge
+    // sits exactly at the gear's tail every frame — no chunky pops
+    const draw = pts.slice();
+    const lastReal = [...pts].reverse().find((p) => p);
+    if (this.head && lastReal && Math.hypot(this.head.x - lastReal.x, this.head.z - lastReal.z) > 0.03) {
+      draw.push(this.head);
+    }
+
     const pos = this.aPos.array;
     const col = this.aCol.array;
     const nrm = this.aNorm.array;
     const n3 = new THREE.Vector3();
     let v = 0;
     const c = new THREE.Color();
-    for (let i = 0; i < pts.length && v < this.max; i++) {
-      const p = pts[i];
+    const LIFT = 0.05; // hug the surface; the polygon offset resolves overlap
+    for (let i = 0; i < draw.length && v < this.max; i++) {
+      const p = draw[i];
       if (!p) continue;
       // consistent forward direction so the ribbon never bowties:
       // toward the next point when there is one, else FROM the previous
-      const nxt = pts[i + 1] || null;
-      const prv = pts[i - 1] || null;
+      const nxt = draw[i + 1] || null;
+      const prv = draw[i - 1] || null;
       let dx = 0, dz = -1;
       if (nxt) {
         dx = nxt.x - p.x;
@@ -254,13 +279,13 @@ export class Trail {
       const d = Math.hypot(dx, dz) || 1;
       const nx = -dz / d;
       const nz = dx / d;
-      const y = this.terrain.heightAt(p.x, p.z) + 0.24;
+      const y = this.terrain.heightAt(p.x, p.z) + LIFT;
       const w = this.width;
       pos[v * 6] = p.x + nx * w;
       pos[v * 6 + 1] = y;
       pos[v * 6 + 2] = p.z + nz * w;
       pos[v * 6 + 3] = p.x - nx * w;
-      pos[v * 6 + 4] = this.terrain.heightAt(p.x - nx * w, p.z - nz * w) + 0.24;
+      pos[v * 6 + 4] = this.terrain.heightAt(p.x - nx * w, p.z - nz * w) + LIFT;
       pos[v * 6 + 5] = p.z - nz * w;
       this.terrain.normalAt(p.x, p.z, n3);
       c.copy(this.trackCol).lerp(this.snowCol, Math.min(1, p.age / this.fadeTime));
