@@ -786,12 +786,22 @@ export function setPose(rider, p = {}) {
     }
   }
   P.prevSteer = steer;
-  // punchy pulse: fast attack, easy release
-  const plantEnv = P.t.map((rem) => {
-    if (rem <= 0) return 0;
-    const u = 1 - rem / PLANT_DUR;
-    return Math.sin(Math.PI * Math.pow(u, 0.6));
-  });
+  // three phase envelopes per plant clock:
+  //   punch — the fast reach that drives the tip into the snow
+  //   trail — the planted stretch: the skier lunges forward off the pole
+  //           while the arm and shaft stream out behind
+  //   out   — the lateral lane, HELD through the whole cycle so the pole
+  //           swings straight back beside the body, never through it
+  const sstep = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+  const plantU = P.t.map((rem) => (rem > 0 ? 1 - rem / PLANT_DUR : -1));
+  const plantPunch = plantU.map((u) => (u < 0 || u >= 0.5 ? 0 : Math.sin(Math.PI * u * 2)));
+  const plantTrail = plantU.map((u) => (u < 0 ? 0 : sstep(0.28, 0.52, u) * (1 - sstep(0.82, 1, u))));
+  const plantOut = plantU.map((u) => (u < 0 ? 0 : sstep(0, 0.16, u) * (1 - sstep(0.82, 1, u))));
+  // the lunge: a brief extra forward fold powered by the planted arm
+  rider.rigFold = (rider.rigFold ?? 0) + Math.max(plantTrail[0], plantTrail[1]) * 0.14;
 
   // arm stance targets blend by state weight instead of hard branches
   for (const arm of parts.arms) {
@@ -819,13 +829,14 @@ export function setPose(rider, p = {}) {
       // skier: hands ride in front, elbows pumping with the carve; the tuck
       // sends both arms straight back with the poles trailing uphill; pole
       // plants punch the inside hand forward with the elbow extending
-      const env = plantEnv[pi];
-      sx = mix(0.42 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + env * 0.95;
-      // the plant reaches diagonally OUT (left hand forward-left, right hand
-      // forward-right) so the stab isn't hidden behind the rider's body
-      sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck) + env * arm.side * 0.55;
-      ex = mix(0.72 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - env * 0.55;
-      wx = mix(0.35 - bk * 0.5, 0.05, tuck) - env * 0.85;
+      const punch = plantPunch[pi], trail = plantTrail[pi], outR = plantOut[pi];
+      // punch forward-and-OUT to the stab, then the planted arm streams
+      // backward past the hip while the body lunges forward off it; the
+      // outward lane holds the whole time so nothing crosses the body
+      sx = mix(0.42 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + punch * 0.95 - trail * 0.85;
+      sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck) + outR * arm.side * 0.6;
+      ex = mix(0.72 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - punch * 0.55 + trail * 0.15;
+      wx = mix(0.35 - bk * 0.5, 0.05, tuck) - punch * 0.85 + trail * 0.3;
     }
     // airborne arms: spread for balance, whip TOWARD the spin to feed it,
     // pull in as it winds up (skater physics), flare back out as it dies,
@@ -860,15 +871,15 @@ export function setPose(rider, p = {}) {
     if (P.t[i] > 0) {
       const u = 1 - P.t[i] / PLANT_DUR;
       if (u < 0.26) off = -1.5 * (u / 0.26); // punch to the stab
-      else if (u < 0.72) off = -1.5 + 2.45 * ((u - 0.26) / 0.46); // planted: sweep past
-      else off = 0.95 * (1 - (u - 0.72) / 0.28); // lift, settle from behind
+      else if (u < 0.72) off = -1.5 + 2.6 * ((u - 0.26) / 0.46); // planted: sweep past
+      else off = 1.1 * (1 - (u - 0.72) / 0.28); // lift, settle from behind
     }
     const hang = idle ? 0.55 : 1.15;
     RX(pole, mix(hang, 2.1, tuck) - longG * 0.3 + off, 4.5, 0.38);
-    // the shaft tilts outward with the diagonal reach so the whole plant
-    // happens beside the rider, in clear view
+    // the shaft holds its outward lane for the WHOLE cycle — stab, backward
+    // stream and recovery all happen beside the rider, never through them
     const side = i === 0 ? -1 : 1;
-    RZ(pole, -side * plantEnv[i] * 0.4, 4.5, 0.38);
+    RZ(pole, -side * plantOut[i] * 0.42, 4.5, 0.38);
   }
   applySkeleton(rider);
 }
