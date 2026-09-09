@@ -97,8 +97,15 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
     const dims = [size.x, size.y, size.z].sort((a, b) => a - b);
     const diag = size.length();
     const wandlike = dims[1] < 0.03 * mDiag && dims[2] > 0.15 * mDiag;
+    // the center-lane stopper bar and its short stub sit between the hub
+    // posts at bar height — dropped along with the side wands so the runtime
+    // can hang its own bar off the right hub and swing it down on GO
+    const centerBar = id === 'start_gate' && size.x > 2
+      && c.box.min.x > -22 && c.box.max.x < 13
+      && c.box.min.y > 5 && c.box.max.y < 10
+      && c.box.min.z > 1 && c.box.max.z < 6;
     let bucket;
-    if (id === 'start_gate' && wandlike && dims[2] === size.x) {
+    if (id === 'start_gate' && ((wandlike && dims[2] === size.x) || centerBar)) {
       bucket = -1; // the baked-in start wands: dropped, the animated ones stay procedural
     } else if (diag > 0.5 * mDiag) bucket = 0;
     // panels must be VERTICAL plates (banners, screens) — flat floors and

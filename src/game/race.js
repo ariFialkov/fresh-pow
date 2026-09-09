@@ -201,7 +201,7 @@ export class RaceScene {
 
     this.fx.update(dt);
     this.pyro.update(dt);
-    this.gate.update(dt, this.time, this.fx, null); // pyro lives at the finish now
+    this.gate.update(dt, this.time, this.fx, null, this.camera.position.z); // pyro lives at the finish now
 
     // finish-line show: big opening salvo, then crackle for ~2 s
     if (this._finishPyroT >= 0 && this._finishPyroT < 2.0) {

@@ -1,0 +1,16 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const server = await createServer({ server: { port: 4311, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+await page.goto('http://localhost:4311/tools/scratch-view.html');
+await page.waitForFunction(() => !!window.__result, undefined, { timeout: 180000 });
+const { shots, info } = JSON.parse(await page.evaluate(() => window.__result));
+for (const [id, b64] of Object.entries(shots)) fs.writeFileSync(`scratch-view-${id}.png`, Buffer.from(b64, 'base64'));
+console.log(JSON.stringify(info, null, 1));
+await browser.close();
+await server.close();
+process.exit(0);
