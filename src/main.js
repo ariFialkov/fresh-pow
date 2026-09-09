@@ -9,6 +9,7 @@ import { Quality } from './game/world.js';
 import { EVENTS } from './game/rtp.js';
 import { showEventRoller } from './game/hud.js';
 import { loadCharacters } from './game/characters.js';
+import { loadProps } from './game/props.js';
 
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -112,7 +113,7 @@ renderer.setAnimationLoop(() => {
   loadEl.textContent = 'WAXING THE GEAR…';
   document.getElementById('ui').appendChild(loadEl);
   try {
-    await loadCharacters();
+    await Promise.all([loadCharacters(), loadProps()]);
   } finally {
     loadEl.remove();
   }

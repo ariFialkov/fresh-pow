@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
+import { createProp } from './props.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -570,26 +571,48 @@ export class Terrain {
       this.gateLanes.push({ x: c0 + (i - 2) * 6.5, z: -4 });
     }
 
-    // finish arch
+    // ---- finish venue: the uploaded arch, podium and grandstands,
+    // tinted to this event's palette ----
     const s = COURSE.length;
     const cx = this.centerAt(s);
-    const y = this.heightAt(cx, -s);
-    const postMat = new THREE.MeshLambertMaterial({ color: 0xf4f9ff });
+
+    const arch = createProp('finish_line', this.theme);
+    arch.scale.set(0.34, 0.22, 0.22);
+    const archY = Math.min(this.heightAt(cx - 17, -s), this.heightAt(cx + 17, -s));
+    arch.position.set(cx, archY - 0.25, -s);
+    group.add(arch);
+
+    // big structures can't sit level on a 27-degree slope — like real venue
+    // builds they stand on scaffold foundations: plant each prop level at
+    // its uphill-corner height with a dark plinth filling down to the snow
+    const plinthMat = new THREE.MeshLambertMaterial({ color: 0x232833 });
+    const founded = (prop, px, pz, halfW, halfD) => {
+      let top = -Infinity, bot = Infinity;
+      for (const [dx, dz] of [[-halfW, -halfD], [halfW, -halfD], [-halfW, halfD], [halfW, halfD]]) {
+        const h = this.heightAt(px + dx, pz + dz);
+        if (h > top) top = h;
+        if (h < bot) bot = h;
+      }
+      prop.position.set(px, top - 0.15, pz);
+      if (top - bot > 0.8) {
+        const depth = top - bot + 1.2;
+        const plinth = new THREE.Mesh(new THREE.BoxGeometry(halfW * 1.9, depth, halfD * 1.9), plinthMat);
+        plinth.position.set(px, top - 0.15 - depth / 2 + 0.1, pz);
+        group.add(plinth);
+      }
+      group.add(prop);
+    };
+
+    const podium = createProp('podium', this.theme);
+    podium.scale.setScalar(0.06);
+    podium.rotation.y = 0.6; // angled toward the run-out
+    founded(podium, cx - 20, -s - 14, 3.2, 2.2);
+
     for (const side of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 9, 8), postMat);
-      const px = cx + side * 15;
-      post.position.set(px, this.heightAt(px, -s) + 4.5, -s);
-      group.add(post);
+      const stand = createProp('bleachers', this.theme);
+      stand.scale.set(0.24, 0.2, 0.13);
+      stand.rotation.y = -side * (Math.PI / 2); // stairs face the corridor
+      founded(stand, cx + side * 27, -s + 20, 6.4, 12.2);
     }
-    const bannerGeo = new THREE.BoxGeometry(31, 2.2, 0.4);
-    const banner = new THREE.Mesh(bannerGeo, new THREE.MeshLambertMaterial({ color: 0xd6452f }));
-    banner.position.set(cx, y + 9.5, -s);
-    group.add(banner);
-    const stripes = new THREE.Mesh(
-      new THREE.BoxGeometry(31, 0.7, 0.42),
-      new THREE.MeshLambertMaterial({ color: 0xf4f9ff })
-    );
-    stripes.position.set(cx, y + 8.6, -s);
-    group.add(stripes);
   }
 }

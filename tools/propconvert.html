@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>prop convert</title></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+// The uploaded props are single untextured meshes. To theme-tint them by
+// part we split each into connected components and bucket the components
+// into four material slots the runtime recolors per venue:
+//   structure — the big frames/platforms (dark steel)
+//   secondary — mid-size hardware, posts, stairs (light steel)
+//   panel     — flat plates: banners, screens, roofs, seat planks (event color)
+//   trim      — small fittings: lights, antennas, speakers (bright accent)
+const BUCKETS = ['structure', 'secondary', 'panel', 'trim'];
+
+const b64 = (buf) => {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+const loader = new FBXLoader();
+const outScene = new THREE.Scene();
+const report = {};
+
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+  const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
+  obj.updateMatrixWorld(true);
+  let src = null;
+  obj.traverse((o) => { if (o.isMesh) src = o; });
+
+  // bake Blender's 100x scale + Z-up rotation into the vertices
+  let geo = src.geometry.clone().applyMatrix4(src.matrixWorld);
+  geo = geo.toNonIndexed ? (geo.index ? geo.toNonIndexed() : geo) : geo;
+  const pos = geo.attributes.position;
+  const triCount = pos.count / 3;
+
+  // union-find over triangles that share (welded) vertex positions
+  const parent = new Int32Array(triCount);
+  for (let i = 0; i < triCount; i++) parent[i] = i;
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  const vertMap = new Map();
+  for (let t = 0; t < triCount; t++) {
+    for (let k = 0; k < 3; k++) {
+      const i = t * 3 + k;
+      const key = `${Math.round(pos.getX(i) * 500)},${Math.round(pos.getY(i) * 500)},${Math.round(pos.getZ(i) * 500)}`;
+      const prev = vertMap.get(key);
+      if (prev === undefined) vertMap.set(key, t);
+      else union(prev, t);
+    }
+  }
+
+  // per-component bounds
+  const comps = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const root = find(t);
+    let c = comps.get(root);
+    if (!c) { c = { tris: [], box: new THREE.Box3() }; comps.set(root, c); }
+    c.tris.push(t);
+    for (let k = 0; k < 3; k++) {
+      const i = t * 3 + k;
+      c.box.expandByPoint(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
+    }
+  }
+  const mBox = new THREE.Box3().setFromBufferAttribute(pos);
+  const mDiag = mBox.getSize(new THREE.Vector3()).length();
+
+  // classify each component
+  const stats = { structure: 0, secondary: 0, panel: 0, trim: 0, dropped: 0 };
+  const triBucket = new Int8Array(triCount).fill(1);
+  for (const c of comps.values()) {
+    const size = c.box.getSize(new THREE.Vector3());
+    const dims = [size.x, size.y, size.z].sort((a, b) => a - b);
+    const diag = size.length();
+    const wandlike = dims[1] < 0.03 * mDiag && dims[2] > 0.15 * mDiag;
+    let bucket;
+    if (id === 'start_gate' && wandlike && dims[2] === size.x) {
+      bucket = -1; // the baked-in start wands: dropped, the animated ones stay procedural
+    } else if (diag > 0.5 * mDiag) bucket = 0;
+    // panels must be VERTICAL plates (banners, screens) — flat floors and
+    // ramps read as garish slabs when they take the event color
+    else if (dims[0] < 0.18 * dims[2] && diag > 0.2 * mDiag && !wandlike && size.y > dims[0] * 2.5) bucket = 2;
+    else if (diag < 0.06 * mDiag) bucket = 3;
+    else bucket = 1;
+    c.bucket = bucket;
+  }
+  // podium: the winner's (tallest) box wears the event color
+  if (id === 'podium') {
+    let tallest = null;
+    for (const c of comps.values()) {
+      if (c.bucket !== 0 && (!tallest || c.box.max.y > tallest.box.max.y)) tallest = c;
+    }
+    if (tallest) tallest.bucket = 2;
+  }
+  for (const c of comps.values()) {
+    for (const t of c.tris) triBucket[t] = c.bucket;
+    if (c.bucket < 0) stats.dropped++;
+    else stats[BUCKETS[c.bucket]]++;
+  }
+
+  // rebuild geometry ordered by bucket, with groups + named materials
+  const order = [];
+  for (let b = 0; b < 4; b++) for (let t = 0; t < triCount; t++) if (triBucket[t] === b) order.push(t);
+  const nPos = new Float32Array(order.length * 9);
+  const nNorm = new Float32Array(order.length * 9);
+  const srcNorm = geo.attributes.normal;
+  let w = 0;
+  for (const t of order) {
+    for (let k = 0; k < 3; k++) {
+      const i = t * 3 + k;
+      nPos[w] = pos.getX(i); nNorm[w++] = srcNorm.getX(i);
+      nPos[w] = pos.getY(i); nNorm[w++] = srcNorm.getY(i);
+      nPos[w] = pos.getZ(i); nNorm[w++] = srcNorm.getZ(i);
+    }
+  }
+  const ng = new THREE.BufferGeometry();
+  ng.setAttribute('position', new THREE.BufferAttribute(nPos, 3));
+  ng.setAttribute('normal', new THREE.BufferAttribute(nNorm, 3));
+  let start = 0;
+  const mats = [];
+  for (let b = 0; b < 4; b++) {
+    let n = 0;
+    for (let t = 0; t < triCount; t++) if (triBucket[t] === b) n++;
+    if (n > 0) {
+      ng.addGroup(start, n * 3, mats.length);
+      const m = new THREE.MeshStandardMaterial({ color: 0x888888 });
+      m.name = BUCKETS[b];
+      mats.push(m);
+      start += n * 3;
+    }
+  }
+  // normalize: unit = model width 100 -> keep native units, recentre with
+  // the base on y=0 so runtime scaling is a single uniform factor
+  ng.computeBoundingBox();
+  const bb = ng.boundingBox;
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  ng.translate(-cx, -bb.min.y, -cz);
+
+  const mesh = new THREE.Mesh(ng, mats);
+  mesh.name = id;
+  outScene.add(mesh);
+  report[id] = { comps: comps.size, tris: triCount, ...stats };
+}
+
+const exporter = new GLTFExporter();
+const glb = await exporter.parseAsync(outScene, { binary: true });
+window.__result = JSON.stringify({ report, glb: b64(glb) });
+document.body.textContent = 'done';
+</script>
+</body>
+</html>

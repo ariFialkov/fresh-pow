@@ -1,0 +1,14 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+const server = await createServer({ server: { port: 4306, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+page.on('console', (m) => { if (m.type() === 'error') console.error('console:', m.text()); });
+await page.goto('http://localhost:4306/tools/propinspect.html');
+await page.waitForFunction(() => !!window.__result, undefined, { timeout: 180000 });
+console.log(await page.evaluate(() => window.__result));
+await browser.close();
+await server.close();
+process.exit(0);

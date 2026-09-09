@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>prop view</title><style>body{margin:0}</style></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(640, 480);
+document.body.appendChild(renderer.domElement);
+const loader = new FBXLoader();
+const shots = {};
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x8798ab);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 1.1));
+  const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
+  sun.position.set(3, 5, 4);
+  scene.add(sun);
+  const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
+  obj.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshLambertMaterial({ color: 0xb9c4cf }); });
+  const box = new THREE.Box3().setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3());
+  const s = box.getSize(new THREE.Vector3()).length();
+  obj.position.sub(c);
+  scene.add(obj);
+  const cam = new THREE.PerspectiveCamera(45, 640 / 480, 0.1, 4000);
+  cam.position.set(s * 0.5, s * 0.35, s * 0.55);
+  cam.lookAt(0, 0, 0);
+  renderer.render(scene, cam);
+  shots[id] = renderer.domElement.toDataURL('image/png').split(',')[1];
+  // orthographic front elevation
+  const bs = box.getSize(new THREE.Vector3());
+  const oc = new THREE.OrthographicCamera(-bs.x * 0.55, bs.x * 0.55, bs.y * 0.75, -bs.y * 0.35, 0.1, 4000);
+  oc.position.set(0, 0, bs.z + 50);
+  oc.lookAt(0, 0, 0);
+  renderer.render(scene, oc);
+  shots[id + '_front'] = renderer.domElement.toDataURL('image/png').split(',')[1];
+  scene.remove(obj);
+}
+window.__result = JSON.stringify(shots);
+</script>
+</body>
+</html>

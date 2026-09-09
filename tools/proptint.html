@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>prop tint</title><style>body{margin:0}</style></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { loadProps, createProp } from '/src/game/props.js';
+import { THEMES } from '/src/game/themes.js';
+
+await loadProps();
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(640, 480);
+document.body.appendChild(renderer.domElement);
+const shots = {};
+for (const [id, themeName] of [['start_gate', 'colorado'], ['pavilion', 'quebec'], ['finish_line', 'swiss'], ['podium', 'utah'], ['bleachers', 'japan']]) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x8798ab);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 1.1));
+  const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
+  sun.position.set(3, 5, 4);
+  scene.add(sun);
+  const obj = createProp(id, THEMES[themeName], 1);
+  const box = new THREE.Box3().setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3());
+  const s = box.getSize(new THREE.Vector3()).length();
+  obj.position.sub(c);
+  scene.add(obj);
+  const cam = new THREE.PerspectiveCamera(45, 640 / 480, 0.1, 4000);
+  cam.position.set(s * 0.48, s * 0.3, s * 0.55);
+  cam.lookAt(0, 0, 0);
+  renderer.render(scene, cam);
+  shots[id] = renderer.domElement.toDataURL('image/png').split(',')[1];
+  scene.remove(obj);
+}
+window.__result = JSON.stringify(shots);
+</script>
+</body>
+</html>

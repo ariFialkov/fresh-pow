@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>prop inspect</title></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const loader = new FBXLoader();
+const out = {};
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+  const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
+  const report = { nodes: [] };
+  const box = new THREE.Box3().setFromObject(obj);
+  report.bbox = {
+    min: box.min.toArray().map((v) => +v.toFixed(1)),
+    max: box.max.toArray().map((v) => +v.toFixed(1)),
+    size: box.getSize(new THREE.Vector3()).toArray().map((v) => +v.toFixed(1)),
+  };
+  obj.traverse((o) => {
+    const n = { name: o.name, type: o.type };
+    if (o.isMesh) {
+      n.verts = o.geometry.attributes.position.count;
+      n.uv = !!o.geometry.attributes.uv;
+      n.groups = o.geometry.groups?.length ?? 0;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      n.mats = mats.map((m) => ({ name: m.name, color: m.color ? '#' + m.color.getHexString() : null }));
+      n.scale = o.scale.toArray().map((v) => +v.toFixed(3));
+      n.rot = o.rotation.toArray().slice(0, 3).map((v) => +(+v).toFixed(2));
+    }
+    report.nodes.push(n);
+  });
+  out[id] = report;
+}
+window.__result = JSON.stringify(out, null, 1);
+document.body.textContent = 'done';
+</script>
+</body>
+</html>

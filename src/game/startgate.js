@@ -1,7 +1,9 @@
-// The start structure: a modern two-pylon truss over all five lanes with
-// electronic lane gates, pulsing LED strips, smoke machines at the pylon feet
-// and pyro on the truss that fires when the gates open.
+// The start structure: the uploaded gate-tower modules (two tiled across the
+// five lanes, venue-tinted) plus the timing pavilion beside them, with the
+// original electronic lane gates, LED track lighting, smoke machines and
+// gate-open pyro layered on top.
 import * as THREE from 'three';
+import { createProp } from './props.js';
 
 export class StartGate {
   constructor(terrain) {
@@ -10,9 +12,7 @@ export class StartGate {
     this.openT = -1; // >=0 once the gates have been released
     this.phase = 'idle';
 
-    const metal = new THREE.MeshLambertMaterial({ color: 0x39404f });
     const darkMetal = new THREE.MeshLambertMaterial({ color: 0x232833 });
-    const accent = new THREE.MeshLambertMaterial({ color: 0xd6452f });
 
     const lanes = terrain.gateLanes;
     const cx = (lanes[0].x + lanes[lanes.length - 1].x) / 2;
@@ -22,52 +22,63 @@ export class StartGate {
     this.cx = cx;
     this.z = z;
     this.trussY = y + 7.2;
+    const theme = terrain.theme;
 
-    // ---- pylons with accent fins, feet and smoke machines ----
+    // ---- two venue-tinted gate modules tiled across the lanes ----
+    // (the model is a two-lane unit; tiling keeps its proportions honest)
     this.smokers = [];
     this.pyroPorts = [];
+    const modW = width / 2 + 0.5;
+    const kx = modW / 100;
+    const ky = 8.5 / 71.7; // tower tops ~8.5 m
+    const kz = 0.1;
     for (const side of [-1, 1]) {
-      const px = cx + (side * width) / 2;
-      const py = terrain.heightAt(px, z);
-      const pylon = new THREE.Mesh(new THREE.BoxGeometry(1.35, 8.6, 1.7), metal);
-      pylon.position.set(px, py + 4.3, z);
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.32, 8.6, 2.4), accent);
-      fin.position.set(px + side * 0.6, py + 4.3, z);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 2.8), darkMetal);
-      foot.position.set(px, py + 0.45, z);
+      const gate = createProp('start_gate', theme);
+      gate.scale.set(kx, ky, kz);
+      const gx = cx + (side * modW) / 2;
+      const gy = terrain.heightAt(gx, z);
+      gate.position.set(gx, gy - 0.25, z + 0.4);
+      this.group.add(gate);
+      // pyro fires off the module tower tops; smoke pours from their feet
+      for (const t of [-0.32, 0.32]) {
+        this.pyroPorts.push(new THREE.Vector3(gx + t * modW, gy + 8.7, z));
+      }
+      const sx = cx + side * (width / 2 - 1);
       const smoker = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.65, 0.9), darkMetal);
-      const sx = px - side * 1.9;
       smoker.position.set(sx, terrain.heightAt(sx, z + 0.8) + 0.35, z + 0.8);
       this.smokers.push(smoker.position.clone());
-      this.pyroPorts.push(new THREE.Vector3(px, py + 9.2, z));
-      this.group.add(pylon, fin, foot, smoker);
+      this.group.add(smoker);
     }
 
-    // ---- truss canopy with LED strips and a screen ----
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(width + 1.6, 1.2, 2.5), metal);
-    beam.position.set(cx, this.trussY, z);
-    const beamTop = new THREE.Mesh(new THREE.BoxGeometry(width + 1.6, 0.4, 1.4), darkMetal);
-    beamTop.position.set(cx, this.trussY + 0.85, z);
-    // truss diagonals for that engineered look
-    for (let i = 0; i < 7; i++) {
-      const dx = cx - width / 2 + ((i + 0.5) * width) / 7;
-      const diag = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.35, 0.16), darkMetal);
-      diag.position.set(dx, this.trussY + 0.4, z);
-      diag.rotation.z = i % 2 ? 0.7 : -0.7;
-      this.group.add(diag);
+    // ---- the timing pavilion, set beside the gate on a level footing ----
+    const pav = createProp('pavilion', theme);
+    pav.scale.set(0.14, 0.115, 0.14);
+    const pvx = cx - (width / 2 + 12);
+    const pvz = z + 4;
+    let pvTop = -Infinity, pvBot = Infinity;
+    for (const [dx, dz] of [[-4, -7], [4, -7], [-4, 7], [4, 7]]) {
+      const h = terrain.heightAt(pvx + dx, pvz + dz);
+      if (h > pvTop) pvTop = h;
+      if (h < pvBot) pvBot = h;
     }
+    pav.position.set(pvx, pvTop - 0.15, pvz);
+    pav.rotation.y = -Math.PI / 2; // service front faces the lanes
+    if (pvTop - pvBot > 0.8) {
+      const pd = pvTop - pvBot + 1.2;
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(7.6, pd, 13.4), darkMetal);
+      plinth.position.set(pvx, pvTop - 0.05 - pd / 2, pvz);
+      this.group.add(plinth);
+    }
+    this.group.add(pav);
+
+    // ---- LED track lighting along the start line ----
     this.ledMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    for (const off of [-1.28, 1.28]) {
-      const led = new THREE.Mesh(new THREE.BoxGeometry(width + 1.7, 0.2, 0.12), this.ledMat);
-      led.position.set(cx, this.trussY - 0.45, z + off);
+    for (const off of [-1.6, 1.6]) {
+      const led = new THREE.Mesh(new THREE.BoxGeometry(width + 1.7, 0.16, 0.14), this.ledMat);
+      led.position.set(cx, y + 0.18, z + off);
       this.group.add(led);
     }
-    this.screenMat = new THREE.MeshBasicMaterial({ color: 0x0d2233 });
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(6.5, 2.1, 0.3), this.screenMat);
-    screen.position.set(cx, this.trussY + 2.1, z);
-    const screenFrame = new THREE.Mesh(new THREE.BoxGeometry(7.1, 2.6, 0.24), darkMetal);
-    screenFrame.position.set(cx, this.trussY + 2.1, z + 0.05);
-    this.group.add(beam, beamTop, screen, screenFrame);
+    this.screenMat = new THREE.MeshBasicMaterial({ color: 0x0d2233 }); // kept for the phase pulse
 
     // ---- per-lane electronic gates ----
     this.laneLightMats = [];
