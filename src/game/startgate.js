@@ -24,25 +24,36 @@ export class StartGate {
     this.trussY = y + 7.2;
     const theme = terrain.theme;
 
-    // ---- two venue-tinted gate modules tiled across the lanes ----
-    // (the model is a two-lane unit; tiling keeps its proportions honest)
+    // ---- the pavilion IS the start house: a big overhang spanning all
+    // lanes, its open front facing downhill, with ten rider-scale start
+    // gate booths lined up under its leading edge ----
     this.smokers = [];
     this.pyroPorts = [];
-    const modW = width / 2 + 0.5;
-    const kx = modW / 100;
-    const ky = 8.5 / 71.7; // tower tops ~8.5 m
-    const kz = 0.1;
+    const pavW = width + 9;
+    const pav = createProp('pavilion', theme);
+    pav.scale.set(pavW / 100, 0.155, 0.185);
+    const pvz = z + 6.5;
+    let pvTop = -Infinity, pvBot = Infinity;
+    for (const [dx, dz] of [[-pavW / 2, -5.5], [pavW / 2, -5.5], [-pavW / 2, 5.5], [pavW / 2, 5.5]]) {
+      const h = terrain.heightAt(cx + dx, pvz + dz);
+      if (h > pvTop) pvTop = h;
+      if (h < pvBot) pvBot = h;
+    }
+    pav.position.set(cx, pvTop - 0.35, pvz);
+    pav.rotation.y = Math.PI; // open front faces down the hill
+    if (pvTop - pvBot > 0.8) {
+      const pd = pvTop - pvBot + 1.4;
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(pavW - 2, pd, 10), darkMetal);
+      plinth.position.set(cx, pvTop - 0.25 - pd / 2, pvz);
+      this.group.add(plinth);
+    }
+    this.group.add(pav);
+    // pyro from the pavilion roof line, smoke machines at its corners
+    const roofY = pvTop + 60.5 * 0.155 - 1.2;
+    for (const t of [-0.36, -0.12, 0.12, 0.36]) {
+      this.pyroPorts.push(new THREE.Vector3(cx + t * pavW, roofY, z + 2));
+    }
     for (const side of [-1, 1]) {
-      const gate = createProp('start_gate', theme);
-      gate.scale.set(kx, ky, kz);
-      const gx = cx + (side * modW) / 2;
-      const gy = terrain.heightAt(gx, z);
-      gate.position.set(gx, gy - 0.25, z + 0.4);
-      this.group.add(gate);
-      // pyro fires off the module tower tops; smoke pours from their feet
-      for (const t of [-0.32, 0.32]) {
-        this.pyroPorts.push(new THREE.Vector3(gx + t * modW, gy + 8.7, z));
-      }
       const sx = cx + side * (width / 2 - 1);
       const smoker = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.65, 0.9), darkMetal);
       smoker.position.set(sx, terrain.heightAt(sx, z + 0.8) + 0.35, z + 0.8);
@@ -50,26 +61,15 @@ export class StartGate {
       this.group.add(smoker);
     }
 
-    // ---- the timing pavilion, set beside the gate on a level footing ----
-    const pav = createProp('pavilion', theme);
-    pav.scale.set(0.14, 0.115, 0.14);
-    const pvx = cx - (width / 2 + 12);
-    const pvz = z + 4;
-    let pvTop = -Infinity, pvBot = Infinity;
-    for (const [dx, dz] of [[-4, -7], [4, -7], [-4, 7], [4, 7]]) {
-      const h = terrain.heightAt(pvx + dx, pvz + dz);
-      if (h > pvTop) pvTop = h;
-      if (h < pvBot) pvBot = h;
+    // ---- ten gate booths, rider-scale, under the pavilion's front edge ----
+    const gw = (width + 2) / 10;
+    for (let i = 0; i < 10; i++) {
+      const booth = createProp('start_gate', theme);
+      booth.scale.set(gw / 100 - 0.002, 0.036, 0.032);
+      const gx = cx + (i - 4.5) * gw;
+      booth.position.set(gx, terrain.heightAt(gx, z + 1.4) - 0.12, z + 1.4);
+      this.group.add(booth);
     }
-    pav.position.set(pvx, pvTop - 0.15, pvz);
-    pav.rotation.y = -Math.PI / 2; // service front faces the lanes
-    if (pvTop - pvBot > 0.8) {
-      const pd = pvTop - pvBot + 1.2;
-      const plinth = new THREE.Mesh(new THREE.BoxGeometry(7.6, pd, 13.4), darkMetal);
-      plinth.position.set(pvx, pvTop - 0.05 - pd / 2, pvz);
-      this.group.add(plinth);
-    }
-    this.group.add(pav);
 
     // ---- LED track lighting along the start line ----
     this.ledMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });

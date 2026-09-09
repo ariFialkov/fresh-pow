@@ -582,6 +582,68 @@ export class Terrain {
     arch.position.set(cx, archY - 0.25, -s);
     group.add(arch);
 
+    // ---- LED screens on the arch, facing the riders: a big banner display
+    // plus vertical neon FINISH signs on each pylon. The materials are
+    // collected on this.finishSigns so the race scene can flash them. ----
+    this.finishSigns = [];
+    const ledTex = (w, h, draw) => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      draw(ctx, w, h);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const accA = '#' + new THREE.Color(this.theme.eventA ?? 0xd6452f).getHexString();
+    const accB = '#' + new THREE.Color(this.theme.eventB ?? 0xf5d76e).getHexString();
+    const bannerMat = new THREE.MeshBasicMaterial({
+      map: ledTex(1024, 160, (ctx, w, h) => {
+        ctx.fillStyle = '#0a0e16';
+        ctx.fillRect(0, 0, w, h);
+        // checker rails top and bottom, like timing eyes
+        for (let x = 0; x < w; x += 32) {
+          for (const y of [0, h - 20]) {
+            ctx.fillStyle = (x / 32) % 2 ? '#e8edf4' : '#12161e';
+            ctx.fillRect(x, y, 32, 20);
+          }
+        }
+        ctx.font = 'bold 96px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = accB;
+        ctx.fillText('FINISH', w / 2, h / 2 + 4);
+      }),
+    });
+    const bannerScreen = new THREE.Mesh(new THREE.PlaneGeometry(17.5, 2.9), bannerMat);
+    bannerScreen.position.set(cx, archY + 7.35, -s + 2.0);
+    group.add(bannerScreen);
+    this.finishSigns.push(bannerMat);
+    for (const side of [-1, 1]) {
+      const signMat = new THREE.MeshBasicMaterial({
+        map: ledTex(128, 640, (ctx, w, h) => {
+          ctx.fillStyle = '#0a0e16';
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = accA;
+          ctx.lineWidth = 10;
+          ctx.strokeRect(8, 8, w - 16, h - 16);
+          ctx.font = 'bold 78px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = accB;
+          const word = 'FINISH';
+          for (let i = 0; i < word.length; i++) {
+            ctx.fillText(word[i], w / 2, 70 + i * ((h - 130) / (word.length - 1)));
+          }
+        }),
+      });
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 8.2), signMat);
+      sign.position.set(cx + side * 13.9, archY + 5.4, -s + 1.6);
+      group.add(sign);
+      this.finishSigns.push(signMat);
+    }
+
     // big structures can't sit level on a 27-degree slope — like real venue
     // builds they stand on scaffold foundations: plant each prop level at
     // its uphill-corner height with a dark plinth filling down to the snow
@@ -614,5 +676,17 @@ export class Terrain {
       stand.rotation.y = -side * (Math.PI / 2); // stairs face the corridor
       founded(stand, cx + side * 27, -s + 20, 6.4, 12.2);
     }
+
+    // spectator pens beside the run-out, and the lift base station at the
+    // bottom — the resort the finishers roll into
+    for (const [bx, bz, k] of [[cx - 32, -s - 4, 0.13], [cx + 30, -s - 10, 0.15]]) {
+      const pen = createProp('barrier', this.theme);
+      pen.scale.setScalar(k);
+      founded(pen, bx, bz, 50 * k * 0.9, 50 * k * 0.9);
+    }
+    const lift = createProp('ski_lift', this.theme);
+    lift.scale.setScalar(0.16);
+    lift.rotation.y = 0.35; // angled toward the corral
+    founded(lift, cx + 16, -s - 40, 8, 8);
   }
 }

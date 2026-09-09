@@ -8,7 +8,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 const loader = new FBXLoader();
 const out = {};
-for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers', 'ski_lift', 'barrier']) {
   const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
   const report = { nodes: [] };
   const box = new THREE.Box3().setFromObject(obj);

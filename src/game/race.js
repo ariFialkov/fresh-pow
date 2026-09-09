@@ -190,6 +190,15 @@ export class RaceScene {
       board: live,
     });
 
+    // neon FINISH signage: a lazy celebratory pulse that goes frantic once
+    // the first rider is across
+    if (this.terrain.finishSigns) {
+      const rate = this._finishPyroT >= 0 ? 11 : 3.2;
+      for (const [i, m] of this.terrain.finishSigns.entries()) {
+        m.color.setScalar(0.62 + 0.38 * Math.sin(this.time * rate + i * 2.1));
+      }
+    }
+
     this.fx.update(dt);
     this.pyro.update(dt);
     this.gate.update(dt, this.time, this.fx, null); // pyro lives at the finish now

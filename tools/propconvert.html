@@ -27,7 +27,7 @@ const loader = new FBXLoader();
 const outScene = new THREE.Scene();
 const report = {};
 
-for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers', 'ski_lift', 'barrier']) {
   const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
   obj.updateMatrixWorld(true);
   let src = null;
@@ -38,6 +38,25 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
   geo = geo.toNonIndexed ? (geo.index ? geo.toNonIndexed() : geo) : geo;
   const pos = geo.attributes.position;
   const triCount = pos.count / 3;
+
+  // drop exact duplicate faces (coincident geometry from boolean modeling
+  // z-fights and reads as texture glitches)
+  const triKey = (t) => {
+    const ks = [];
+    for (let k = 0; k < 3; k++) {
+      const i = t * 3 + k;
+      ks.push(`${Math.round(pos.getX(i) * 500)},${Math.round(pos.getY(i) * 500)},${Math.round(pos.getZ(i) * 500)}`);
+    }
+    return ks.sort().join('|');
+  };
+  const seen = new Set();
+  const dupTri = new Uint8Array(triCount);
+  let dupFaces = 0;
+  for (let t = 0; t < triCount; t++) {
+    const k = triKey(t);
+    if (seen.has(k)) { dupTri[t] = 1; dupFaces++; }
+    else seen.add(k);
+  }
 
   // union-find over triangles that share (welded) vertex positions
   const parent = new Int32Array(triCount);
@@ -97,6 +116,29 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
     }
     if (tallest) tallest.bucket = 2;
   }
+  // no exact duplicate faces exist, but flat plates often sit exactly on a
+  // parent surface and z-fight at range. Float each flat panel/trim
+  // component a few cm out along its mean normal to separate the planes.
+  const srcN = geo.attributes.normal;
+  for (const c of comps.values()) {
+    if (c.bucket !== 2 && c.bucket !== 3) continue;
+    const size = c.box.getSize(new THREE.Vector3());
+    const dims = [size.x, size.y, size.z].sort((a, b) => a - b);
+    if (dims[0] > 0.25 * dims[2]) continue; // only genuinely flat pieces
+    const n = new THREE.Vector3();
+    for (const t of c.tris) {
+      for (let k = 0; k < 3; k++) n.add(new THREE.Vector3().fromBufferAttribute(srcN, t * 3 + k));
+    }
+    if (n.lengthSq() < 1e-6) continue; // closed plate: normals cancel, leave it
+    n.normalize().multiplyScalar(0.12);
+    for (const t of c.tris) {
+      for (let k = 0; k < 3; k++) {
+        const i = t * 3 + k;
+        pos.setXYZ(i, pos.getX(i) + n.x, pos.getY(i) + n.y, pos.getZ(i) + n.z);
+      }
+    }
+  }
+
   for (const c of comps.values()) {
     for (const t of c.tris) triBucket[t] = c.bucket;
     if (c.bucket < 0) stats.dropped++;
@@ -105,7 +147,7 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
 
   // rebuild geometry ordered by bucket, with groups + named materials
   const order = [];
-  for (let b = 0; b < 4; b++) for (let t = 0; t < triCount; t++) if (triBucket[t] === b) order.push(t);
+  for (let b = 0; b < 4; b++) for (let t = 0; t < triCount; t++) if (triBucket[t] === b && !dupTri[t]) order.push(t);
   const nPos = new Float32Array(order.length * 9);
   const nNorm = new Float32Array(order.length * 9);
   const srcNorm = geo.attributes.normal;
@@ -125,7 +167,7 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
   const mats = [];
   for (let b = 0; b < 4; b++) {
     let n = 0;
-    for (let t = 0; t < triCount; t++) if (triBucket[t] === b) n++;
+    for (let t = 0; t < triCount; t++) if (triBucket[t] === b && !dupTri[t]) n++;
     if (n > 0) {
       ng.addGroup(start, n * 3, mats.length);
       const m = new THREE.MeshStandardMaterial({ color: 0x888888 });
@@ -144,7 +186,7 @@ for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers'
   const mesh = new THREE.Mesh(ng, mats);
   mesh.name = id;
   outScene.add(mesh);
-  report[id] = { comps: comps.size, tris: triCount, ...stats };
+  report[id] = { comps: comps.size, tris: triCount, dupFaces, ...stats };
 }
 
 const exporter = new GLTFExporter();

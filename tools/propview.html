@@ -11,7 +11,7 @@ renderer.setSize(640, 480);
 document.body.appendChild(renderer.domElement);
 const loader = new FBXLoader();
 const shots = {};
-for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers']) {
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers', 'ski_lift', 'barrier']) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8798ab);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 1.1));
