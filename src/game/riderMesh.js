@@ -846,10 +846,11 @@ export function setPose(rider, p = {}) {
     // look), sweep flat back-uphill in a tuck, and swing forward to stab on
     // a plant. The soft spring lets them lag and swing like dead weight.
     const env = plantEnv[i];
-    // rig-frame targets: near-vertical at a standstill, trailing down-back
-    // at cruise, flat back-uphill in a tuck, stabbing just ahead on a plant
-    const hang = idle ? -0.55 : -1.15;
-    RX(pole, mix(hang, -2.1, tuck) + longG * 0.3 + env * 1.35, 4.5, 0.38);
+    // rig-frame targets (the holder's Y-flip makes POSITIVE rx swing the
+    // tip backward-uphill): near-vertical at a standstill, trailing
+    // down-back at cruise, flat back in a tuck, stabbing ahead on a plant
+    const hang = idle ? 0.55 : 1.15;
+    RX(pole, mix(hang, 2.1, tuck) - longG * 0.3 - env * 1.35, 4.5, 0.38);
   }
   applySkeleton(rider);
 }
