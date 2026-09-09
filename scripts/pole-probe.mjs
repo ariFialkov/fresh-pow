@@ -54,7 +54,11 @@ const trace = await page.evaluate(async () => {
   p.rider._plant.t[0] = 0; p.rider._plant.t[1] = 0;
   await new Promise((res) => {
     const iv = setInterval(() => {
-      pts.push({ t: +(p.t - t0).toFixed(2), rx: +p.rider.parts.poles[1].rotation.x.toFixed(2), rem: +(p.rider._plant.t[1]).toFixed(2) });
+      const pg = p.rider.parts.poles[1];
+      p.obj.updateMatrixWorld(true);
+      const V = p.pos.constructor;
+      const g = pg.localToWorld(new V(0,0,0)), tp = pg.localToWorld(new V(0,-0.9,0));
+      pts.push({ t: +(p.t - t0).toFixed(2), rx: +pg.rotation.x.toFixed(2), latX: +(tp.x - g.x).toFixed(2), rem: +(p.rider._plant.t[1]).toFixed(2) });
       if (p.t - t0 > 1.6) { clearInterval(iv); res(); }
     }, 120);
   });

@@ -821,7 +821,9 @@ export function setPose(rider, p = {}) {
       // plants punch the inside hand forward with the elbow extending
       const env = plantEnv[pi];
       sx = mix(0.42 + bk * -0.35 + wobA + steer * arm.side * 0.18, -0.82, tuck) + env * 0.95;
-      sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck);
+      // the plant reaches diagonally OUT (left hand forward-left, right hand
+      // forward-right) so the stab isn't hidden behind the rider's body
+      sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck) + env * arm.side * 0.55;
       ex = mix(0.72 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - env * 0.55;
       wx = mix(0.35 - bk * 0.5, 0.05, tuck) - env * 0.85;
     }
@@ -863,6 +865,10 @@ export function setPose(rider, p = {}) {
     }
     const hang = idle ? 0.55 : 1.15;
     RX(pole, mix(hang, 2.1, tuck) - longG * 0.3 + off, 4.5, 0.38);
+    // the shaft tilts outward with the diagonal reach so the whole plant
+    // happens beside the rider, in clear view
+    const side = i === 0 ? -1 : 1;
+    RZ(pole, -side * plantEnv[i] * 0.4, 4.5, 0.38);
   }
   applySkeleton(rider);
 }
