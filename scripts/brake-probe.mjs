@@ -23,8 +23,10 @@ for (const key of ['a', 'd']) {
   const t0 = await page.evaluate(() => window.__fp.race.player.t);
   await page.waitForFunction((te) => window.__fp.race.player.t >= te, t0 + 0.3, { timeout: 60000 });
   await page.keyboard.down('s');
-  const t1 = await page.evaluate(() => window.__fp.race.player.t);
-  await page.waitForFunction((te) => window.__fp.race.player.t >= te, t1 + 0.5, { timeout: 60000 });
+  await page.waitForFunction(() => {
+    const p = window.__fp.race.player;
+    return !p.airborne && Math.abs(p.rider.gearGroup.rotation.y) > 1.2 && p.speed > 3;
+  }, undefined, { timeout: 90000 });
   const r = await page.evaluate(() => {
     const rc = window.__fp.race;
     const p = rc.player;
@@ -35,8 +37,12 @@ for (const key of ['a', 'd']) {
     const tail = g.localToWorld(new V(0, 0.04, 0.65));
     const gNose = rc.terrain.heightAt(nose.x, nose.z);
     const gTail = rc.terrain.heightAt(tail.x, tail.z);
+    const tr = rc.playerTrail.tracks[0];
     return {
       edgeLean: p.rider._edgeLean,
+      trailW: +(tr.trail.head?.w ?? 0).toFixed(3),
+      baseW: tr.w,
+      maxW: tr.wMax,
       gearYaw: +p.rider.gearGroup.rotation.y.toFixed(2),
       tipDy: +(nose.y - tail.y).toFixed(3),
       groundDy: +(gNose - gTail).toFixed(3),

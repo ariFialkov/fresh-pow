@@ -146,14 +146,21 @@ export class RaceScene {
       else this.playerStallTime = 0;
 
       this.player.update(dt);
-      this.playerTrail.push(this.player.pos.x, this.player.pos.z, this.player.yaw, !this.player.airborne);
+      this.playerTrail.push(
+        this.player.pos.x,
+        this.player.pos.z,
+        this.player.yaw,
+        !this.player.airborne,
+        Math.abs(Math.sin(this.player.rider.gearGroup.rotation.y))
+      );
       for (const b of this.bots) {
         b.update(dt, this);
         b.trail.push(
           b.obj.position.x,
           b.obj.position.z,
           b.visYaw || 0,
-          b.y <= this.terrain.heightAt(b.obj.position.x, b.obj.position.z) + 0.25
+          b.y <= this.terrain.heightAt(b.obj.position.x, b.obj.position.z) + 0.25,
+          Math.abs(Math.sin(b.rider.gearGroup.rotation.y))
         );
       }
       this._resolveRiderCollisions(dt);

@@ -165,26 +165,35 @@ export class GearTrails {
   constructor(scene, terrain, gear) {
     // off = lateral offset, tail = how far behind the rider the line leaves
     // the gear (board tail, ski tails, sled stern) so the track visibly
-    // pours out of the vehicle instead of appearing underneath the body
+    // pours out of the vehicle instead of appearing underneath the body.
+    // wMax = the track's half-width once the gear is fully sideways in a
+    // brake check — a perpendicular board presses a board-LENGTH swath.
     const specs =
       gear.type === 'ski'
-        ? [{ off: -0.175, w: 0.065, tail: 0.8 }, { off: 0.175, w: 0.065, tail: 0.8 }]
+        ? [{ off: -0.175, w: 0.065, wMax: 0.5, tail: 0.8 }, { off: 0.175, w: 0.065, wMax: 0.5, tail: 0.8 }]
         : gear.type === 'board'
-          ? [{ off: 0, w: 0.16, tail: 0.62 }]
+          ? [{ off: 0, w: 0.16, wMax: 0.62, tail: 0.62 }]
           : gear.id === 'sled-saucer'
-            ? [{ off: 0, w: 0.36, tail: 0.6 }]
-            : [{ off: -0.21, w: 0.045, tail: 0.75 }, { off: 0.21, w: 0.045, tail: 0.75 }];
-    this.tracks = specs.map((s) => ({ off: s.off, tail: s.tail, trail: new Trail(scene, terrain, s.w) }));
+            ? [{ off: 0, w: 0.36, wMax: 0.4, tail: 0.6 }]
+            : [{ off: -0.21, w: 0.045, wMax: 0.1, tail: 0.75 }, { off: 0.21, w: 0.045, wMax: 0.1, tail: 0.75 }];
+    this.tracks = specs.map((s) => ({ ...s, trail: new Trail(scene, terrain, s.w) }));
   }
 
-  /** yaw = the vehicle's heading (rotation convention: forward = -z at 0). */
-  push(x, z, yaw, grounded) {
+  /**
+   * yaw = the vehicle's heading (rotation convention: forward = -z at 0);
+   * spread 0..1 = how far the gear has swung sideways (|sin(gear yaw)|) —
+   * the track smoothly widens toward the gear's length and moves up under
+   * its center as a brake check turns it across the line of travel.
+   */
+  push(x, z, yaw, grounded, spread = 0) {
     const rx = Math.cos(yaw);
     const rz = Math.sin(yaw);
     const bx = -Math.sin(yaw); // unit vector pointing behind the gear
     const bz = Math.cos(yaw);
     for (const t of this.tracks) {
-      t.trail.push(x + rx * t.off + bx * t.tail, z + rz * t.off + bz * t.tail, grounded);
+      const w = t.w + (t.wMax - t.w) * spread;
+      const tail = t.tail * (1 - spread * 0.8);
+      t.trail.push(x + rx * t.off + bx * tail, z + rz * t.off + bz * tail, grounded, w);
     }
   }
 
@@ -247,7 +256,7 @@ export class Trail {
     this.head = null; // live point pinned to the gear's tail every frame
   }
 
-  push(x, z, grounded) {
+  push(x, z, grounded, w = this.width) {
     if (!grounded) {
       // break the ribbon over jumps
       if (this.points.length && this.points[this.points.length - 1] !== null) this.points.push(null);
@@ -256,10 +265,10 @@ export class Trail {
     }
     // the head follows the vehicle continuously so the ribbon pours out of
     // the gear instead of popping forward in minDist-sized chunks
-    this.head = { x, z, age: 0 };
+    this.head = { x, z, age: 0, w };
     const last = [...this.points].reverse().find((p) => p);
     if (last && Math.hypot(x - last.x, z - last.z) < this.minDist) return;
-    this.points.push({ x, z, age: 0 });
+    this.points.push({ x, z, age: 0, w });
     while (this.points.length > this.max - 1) this.points.shift();
   }
 
@@ -303,7 +312,7 @@ export class Trail {
       const nx = -dz / d;
       const nz = dx / d;
       const y = this.terrain.heightAt(p.x, p.z) + LIFT;
-      const w = this.width;
+      const w = p.w ?? this.width; // per-point: checks press a wider swath
       pos[v * 6] = p.x + nx * w;
       pos[v * 6 + 1] = y;
       pos[v * 6 + 2] = p.z + nz * w;
