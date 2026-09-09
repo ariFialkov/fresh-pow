@@ -61,7 +61,7 @@ export class Terrain {
     }
 
     // ice bridges: a crosswise snow ridge with a portal gap — ride the ridge
-    // over the top, or thread the arch through the underpass
+    // over the top, or thread the open notch straight through
     this.bridges = [];
     let bs = 340 + rng() * 160;
     while (bs < COURSE.length - 320) {
@@ -91,6 +91,43 @@ export class Terrain {
         xOff: (rng() < 0.5 ? -1 : 1) * (10 + rng() * 18),
         h: 3.2 + rng() * 2.4,
         w: 7 + rng() * 4,
+      });
+    }
+
+    // natural half-pipe: a carved U-channel running down the fall line —
+    // pump the transitions for big airs and trick points
+    this.pipes = [];
+    for (let tries = 0; tries < 24 && this.pipes.length === 0; tries++) {
+      const ps = 380 + rng() * (COURSE.length - 800);
+      const pe = ps + 80 + rng() * 35;
+      const clear =
+        !this.jumps.some((j) => j.s > ps - 35 && j.s < pe + 45) &&
+        !this.drops.some((d) => d.s > ps - 35 && d.s < pe + 45) &&
+        !this.bridges.some((b) => b.s > ps - 55 && b.s < pe + 60) &&
+        !this.spines.some((sp) => ps < sp.s1 + 30 && pe > sp.s0 - 30);
+      if (clear) {
+        this.pipes.push({ s0: ps, s1: pe, off: (rng() - 0.5) * 14, w: 10 + rng() * 3, d: 3.8 + rng() * 1.2 });
+      }
+    }
+
+    // cliffside ledges: a sheer-faced rock shelf along one side — a wall to
+    // dodge from below, a drop-off trick line from above
+    this.ledges = [];
+    for (let tries = 0; tries < 14 && this.ledges.length < 2; tries++) {
+      const ls = 300 + rng() * (COURSE.length - 700);
+      const le = ls + 100 + rng() * 60;
+      const clear =
+        !this.jumps.some((j) => j.s > ls - 30 && j.s < le + 30) &&
+        !this.bridges.some((b) => b.s > ls - 55 && b.s < le + 55) &&
+        !this.pipes.some((p) => ls < p.s1 + 50 && le > p.s0 - 50) &&
+        !this.ledges.some((o) => ls < o.s1 + 80 && le > o.s0 - 80);
+      if (!clear) continue;
+      this.ledges.push({
+        s0: ls,
+        s1: le,
+        side: rng() < 0.5 ? -1 : 1,
+        h: (3.5 + rng() * 2.5) * Math.max(0.6, theme.cliffMul),
+        uFace: 0.34 + rng() * 0.2,
       });
     }
 
@@ -131,17 +168,31 @@ export class Terrain {
       }
     }
 
-    // 2) glades: dense organized woods bulging into the run — pick a line
-    //    around them or thread the clearings
+    // 2) glades: wide forested shoulders bulging deep into the run, with a
+    //    narrow cleared line meandering through the bumps and trunks — thread
+    //    it or swing around the whole wood
+    const nearPipe = (ts) => this.pipes.some((p) => ts > p.s0 - 30 && ts < p.s1 + 30);
+    // scatter guards: keep hazards out of the half-pipe channel and off the
+    // sheer ledge faces
+    const inPipe = (x, ts) =>
+      this.pipes.some((p) => ts > p.s0 - 25 && ts < p.s1 + 25 && Math.abs(x - (this.centerAt(ts) + p.off)) < p.w * 1.7);
+    const onLedgeFace = (x, ts) =>
+      this.ledges.some((L) => {
+        if (ts < L.s0 - 20 || ts > L.s1 + 20) return false;
+        const us = ((x - this.centerAt(ts)) / COURSE.halfWidth) * L.side;
+        return Math.abs(us - L.uFace) < 0.09;
+      });
     this.glades = [];
     let gs = treeMul < 0.3 ? COURSE.length : 220 + rng() * 200; // treeless venues skip glades
     while (gs < COURSE.length - 260) {
-      if (!nearBridge(gs) && !nearJump(gs)) {
+      if (!nearBridge(gs) && !nearJump(gs) && !nearPipe(gs)) {
         this.glades.push({
           s0: gs,
-          s1: gs + 110 + rng() * 130,
+          s1: gs + 120 + rng() * 140,
           side: rng() < 0.5 ? -1 : 1,
-          depth: 0.34 + rng() * 0.2,
+          depth: 0.46 + rng() * 0.22,
+          pathPh: rng() * Math.PI * 2,
+          pathFreq: 0.03 + rng() * 0.02,
         });
         gs += 340 + rng() * 300;
       } else {
@@ -149,15 +200,18 @@ export class Terrain {
       }
     }
     for (const g of this.glades) {
-      for (let ts = g.s0; ts < g.s1; ts += 6.5) {
-        for (let r = 0; r < 4; r++) {
-          if (rng() < 0.22) continue; // clearings to thread
-          const u = 1.0 - g.depth * (r / 3) - rng() * 0.05;
-          addTree(
-            this.centerAt(ts) + g.side * COURSE.halfWidth * u + (rng() - 0.5) * 2.5,
-            ts + (rng() - 0.5) * 4,
-            u < 1.0
-          );
+      for (let ts = g.s0; ts < g.s1; ts += 5.5) {
+        // the cleared path snakes between the run edge and the glade's
+        // inner fringe
+        const pathU = 1 - g.depth * (0.5 + 0.38 * Math.sin((ts - g.s0) * g.pathFreq + g.pathPh));
+        for (let r = 0; r < 5; r++) {
+          if (rng() < 0.1) continue; // stray gaps beyond the main line
+          const u = 1.0 - g.depth * (r / 4) - rng() * 0.05;
+          if (Math.abs(u - pathU) < 0.055) continue; // keep the path clear
+          const tx = this.centerAt(ts) + g.side * COURSE.halfWidth * u + (rng() - 0.5) * 2.5;
+          const tsJ = ts + (rng() - 0.5) * 4;
+          if (onLedgeFace(tx, tsJ)) continue;
+          addTree(tx, tsJ, u < 1.0);
         }
       }
     }
@@ -167,7 +221,7 @@ export class Terrain {
     for (let i = 0; i < loneTrees; i++) {
       const ts = 150 + rng() * (COURSE.length - 280);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.1;
-      if (nearJump(ts) || nearBridge(ts)) continue;
+      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       addTree(x, ts, true);
     }
 
@@ -180,14 +234,17 @@ export class Terrain {
       const cxr = this.centerAt(cs) + side * COURSE.halfWidth * (0.7 + rng() * 0.22);
       const n = 4 + Math.floor(rng() * 5);
       for (let i = 0; i < n; i++) {
-        addRock(cxr + (rng() - 0.5) * 11, cs + (rng() - 0.5) * 15, true);
+        const rx = cxr + (rng() - 0.5) * 11;
+        const rs = cs + (rng() - 0.5) * 15;
+        if (inPipe(rx, rs) || onLedgeFace(rx, rs)) continue;
+        addRock(rx, rs, true);
       }
     }
     const loneRocks = clamp(Math.round(26 * theme.rockMul), 8, 55);
     for (let i = 0; i < loneRocks; i++) {
       const ts = 160 + rng() * (COURSE.length - 320);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.4;
-      if (nearJump(ts) || nearBridge(ts)) continue;
+      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
     }
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
@@ -274,6 +331,38 @@ export class Terrain {
       }
     }
 
+    // natural half-pipe: sunken center, raised lips, smooth run-in/out
+    for (const p of this.pipes) {
+      if (s > p.s0 - 30 && s < p.s1 + 30) {
+        const env = smoothstep(p.s0 - 25, p.s0 + 10, s) * (1 - smoothstep(p.s1 - 10, p.s1 + 25, s));
+        const q = (x - (c + p.off)) / p.w;
+        const aq = Math.abs(q);
+        const prof = aq <= 1 ? q * q - 0.55 : 0.45 * (1 - smoothstep(1, 1.6, aq));
+        h += p.d * env * prof;
+      }
+    }
+
+    // cliffside ledges: one side steps up behind a near-vertical rock face
+    for (const L of this.ledges) {
+      if (s > L.s0 - 40 && s < L.s1 + 40) {
+        const env = smoothstep(L.s0 - 30, L.s0 + 15, s) * (1 - smoothstep(L.s1 - 15, L.s1 + 30, s));
+        const face = L.uFace + noise1(s * 0.02, this.seed + 7) * 0.05;
+        h += L.h * env * smoothstep(face, face + 0.045, u * L.side);
+      }
+    }
+
+    // glades ride over rougher, bumpier snow than the groomed corridor
+    for (const g of this.glades) {
+      if (s > g.s0 - 10 && s < g.s1 + 10) {
+        const us = u * g.side;
+        const band = smoothstep(1 - g.depth - 0.06, 1 - g.depth + 0.04, us) * (1 - smoothstep(1.0, 1.1, us));
+        if (band > 0) {
+          const env = smoothstep(g.s0 - 8, g.s0 + 14, s) * (1 - smoothstep(g.s1 - 14, g.s1 + 8, s));
+          h += 1.15 * band * env * fbm2(x * 0.1, su * 0.1, this.seed + 53, 2);
+        }
+      }
+    }
+
     // crevices: narrow icy trenches
     for (const cv of this.crevices) {
       const ds = (s - cv.s) / 3.2;
@@ -307,35 +396,7 @@ export class Terrain {
   build(group) {
     this._buildGround(group);
     this._buildInstances(group);
-    this._buildBridges(group);
     this._buildGatesAndFinish(group);
-  }
-
-  _buildBridges(group) {
-    // A vault of snow filling the ridge above each portal: outer surface
-    // rounds up to the ridge crest, inner surface is the arched tunnel
-    // ceiling. Snow-colored so it reads as part of the mountain, with the
-    // underside falling into natural blue shade from the hemisphere light.
-    const snowMat = new THREE.MeshLambertMaterial({ color: 0xecf3fa });
-    for (const b of this.bridges) {
-      const floorY = this.heightAt(b.gapX, -b.s);
-      const r1 = b.gapW / 2 + 0.4; // tunnel opening
-      const r2 = r1 + 4.2; // shoulders that bury into the ridge
-      const shape = new THREE.Shape();
-      shape.absarc(0, 0, r2, 0, Math.PI, false);
-      shape.lineTo(-r1, 0);
-      shape.absarc(0, 0, r1, Math.PI, 0, true);
-      shape.lineTo(r2, 0);
-      // short enough that both end caps stay buried where the ridge is tall
-      const depth = b.len * 0.66;
-      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 22 });
-      geo.applyMatrix4(new THREE.Matrix4().makeScale(1, (b.h + 1.7) / r2, 1));
-      const vault = new THREE.Mesh(geo, snowMat);
-      vault.position.set(b.gapX, floorY - 0.2, -b.s - depth / 2);
-      vault.castShadow = true;
-      vault.receiveShadow = true;
-      group.add(vault);
-    }
   }
 
   _buildGround(group) {
