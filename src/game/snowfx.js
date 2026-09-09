@@ -293,9 +293,38 @@ export class Trail {
     let v = 0;
     const c = new THREE.Color();
     const LIFT = 0.05; // hug the surface; the polygon offset resolves overlap
+    // a null point marks a jump. The static index buffer stitches every
+    // consecutive vertex pair, so simply skipping the null used to draw one
+    // long quad across the whole flight — the trail "magically" bridging the
+    // air. Cutting the strip for real takes two zero-width collapsed pairs
+    // (degenerate triangles rasterize to nothing), one at each side of the
+    // gap, so the track ends at takeoff and restarts cleanly at the landing.
+    const collapsedPair = (x, y, z) => {
+      for (const side of [0, 1]) {
+        pos[v * 6 + side * 3] = x;
+        pos[v * 6 + side * 3 + 1] = y;
+        pos[v * 6 + side * 3 + 2] = z;
+        col[v * 6 + side * 3] = c.r;
+        col[v * 6 + side * 3 + 1] = c.g;
+        col[v * 6 + side * 3 + 2] = c.b;
+        nrm[v * 6 + side * 3] = 0;
+        nrm[v * 6 + side * 3 + 1] = 1;
+        nrm[v * 6 + side * 3 + 2] = 0;
+      }
+      v++;
+    };
+    let pendingBreak = false;
     for (let i = 0; i < draw.length && v < this.max; i++) {
       const p = draw[i];
-      if (!p) continue;
+      if (!p) {
+        pendingBreak = v > 0;
+        continue;
+      }
+      if (pendingBreak && v < this.max - 2) {
+        collapsedPair(pos[(v - 1) * 6], pos[(v - 1) * 6 + 1], pos[(v - 1) * 6 + 2]);
+        collapsedPair(p.x, this.terrain.heightAt(p.x, p.z) + LIFT, p.z);
+        pendingBreak = false;
+      }
       // consistent forward direction so the ribbon never bowties:
       // toward the next point when there is one, else FROM the previous
       const nxt = draw[i + 1] || null;
