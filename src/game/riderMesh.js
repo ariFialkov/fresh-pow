@@ -268,10 +268,13 @@ export function createRider(gear, helmetColor) {
     poles: [],
   };
 
-  // ski poles hang from the hands: a holder cancels the hand's rest
-  // orientation so the pole lives in rig space and swings with the wrist
+  // ski poles hang from the hands positionally, but their SWING frame is
+  // re-stabilized to the rig every frame in applySkeleton — a plant must
+  // stab and pivot backward along the line of travel, not wherever the
+  // mid-punch hand happens to be pointing (which read as an inward sweep)
   if (gear.type === 'ski') {
     const poleMat = mat(0x3a404c);
+    ctl.poleStab = [];
     for (const s of [-1, 1]) {
       const hand = char.sided.hands[s];
       const holder = new THREE.Group();
@@ -279,6 +282,7 @@ export function createRider(gear, helmetColor) {
       holder.quaternion.copy(handRest.invert()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI));
       holder.scale.setScalar(1 / MODEL_SCALE);
       hand.add(holder);
+      ctl.poleStab.push({ hand, holder });
       const poleG = new THREE.Group();
       const pole = mesh(cached('pole', () => new THREE.CylinderGeometry(0.011, 0.011, 1.05, 5)), poleMat);
       pole.position.y = -0.38;
@@ -358,6 +362,7 @@ const _calfDir = new THREE.Vector3();
 const _legQ = new THREE.Quaternion();
 const _RIG_X = new THREE.Vector3(-1, 0, 0); // rig lateral axis in model space
 const _UP = new THREE.Vector3(0, 1, 0);
+const _POLE_FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI);
 
 // Orthonormal frame (X ~ bend axis, Y = bone direction) -> quaternion.
 function frameQuat(out, x, y) {
@@ -486,6 +491,17 @@ function applySkeleton(rider) {
       setJoint(ctl, 'upleg' + s, leg.hip.rotation.x, leg.hip.rotation.y, leg.hip.rotation.z);
       setJoint(ctl, 'leg' + s, leg.knee.rotation.x, 0, 0);
       setJoint(ctl, 'foot' + s, leg.ankle.rotation.x, leg.ankle.rotation.y, leg.ankle.rotation.z);
+    }
+  }
+
+  // pole holders: cancel the hand's LIVE orientation so the pole frame is
+  // always rig-aligned — the grip rides in the hand, the shaft swings only
+  // fore-aft along travel (hang, plant and recovery all sagittal)
+  if (ctl.poleStab) {
+    rider.rig.getWorldQuaternion(_q2).multiply(_POLE_FLIP);
+    for (const ps of ctl.poleStab) {
+      ps.hand.getWorldQuaternion(_q1);
+      ps.holder.quaternion.copy(_q1.invert()).multiply(_q2);
     }
   }
 
@@ -830,7 +846,10 @@ export function setPose(rider, p = {}) {
     // look), sweep flat back-uphill in a tuck, and swing forward to stab on
     // a plant. The soft spring lets them lag and swing like dead weight.
     const env = plantEnv[i];
-    RX(pole, mix(-1.72, -2.1, tuck) + longG * 0.3 + env * 1.6, 4.5, 0.38);
+    // rig-frame targets: near-vertical at a standstill, trailing down-back
+    // at cruise, flat back-uphill in a tuck, stabbing just ahead on a plant
+    const hang = idle ? -0.55 : -1.15;
+    RX(pole, mix(hang, -2.1, tuck) + longG * 0.3 + env * 1.35, 4.5, 0.38);
   }
   applySkeleton(rider);
 }
