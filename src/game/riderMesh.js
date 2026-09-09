@@ -738,11 +738,13 @@ export function setPose(rider, p = {}) {
   // about the rig's lateral axis (hips + spine chain), because the spine
   // bones hang under the yawed pelvis and any local-axis pitch would bend
   // the sideways board rider toward his hips' facing instead of downhill
-  rider.rigFold = isBoard ? tuck * 1.5 * (1 - knocked) : 0;
+  // the ski tuck folds through the same world-frame mechanism — its local
+  // spine pitch was reading as a backward (uphill) lean
+  rider.rigFold = tuck * (isBoard ? 1.5 : 1.1) * (1 - knocked);
 
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.15 : 0.45) - brake * 0.22 + knocked * 0.5 + shift * 0.22
+    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.15 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
       + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (left turn): lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
