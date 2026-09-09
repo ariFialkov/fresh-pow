@@ -18,6 +18,7 @@ for (const key of ['a', 'd']) {
     r.player.speed = 16; r.player.airborne = false; r.player.vy = 0;
     r.player.yaw = 0; r.player.travelYaw = 0; r.player.knockT = 0; r.player.stumbleT = 0;
   });
+  await page.waitForFunction(() => !window.__fp.race.player.airborne && window.__fp.race.player.speed > 6, undefined, { timeout: 60000 });
   await page.keyboard.down(key);
   const t0 = await page.evaluate(() => window.__fp.race.player.t);
   await page.waitForFunction((te) => window.__fp.race.player.t >= te, t0 + 0.3, { timeout: 60000 });
@@ -25,12 +26,22 @@ for (const key of ['a', 'd']) {
   const t1 = await page.evaluate(() => window.__fp.race.player.t);
   await page.waitForFunction((te) => window.__fp.race.player.t >= te, t1 + 0.5, { timeout: 60000 });
   const r = await page.evaluate(() => {
-    const p = window.__fp.race.player;
+    const rc = window.__fp.race;
+    const p = rc.player;
+    p.obj.updateMatrixWorld(true);
+    const g = p.rider.gearGroup;
+    const V = p.pos.constructor;
+    const nose = g.localToWorld(new V(0, 0.04, -0.65));
+    const tail = g.localToWorld(new V(0, 0.04, 0.65));
+    const gNose = rc.terrain.heightAt(nose.x, nose.z);
+    const gTail = rc.terrain.heightAt(tail.x, tail.z);
     return {
       edgeLean: p.rider._edgeLean,
-      brakeSide: p.rider._brakeSide,
-      rigRoll: +p.rider.rig.rotation.z.toFixed(2),
-      gearRoll: +p.rider.gearGroup.rotation.z.toFixed(2),
+      gearYaw: +p.rider.gearGroup.rotation.y.toFixed(2),
+      tipDy: +(nose.y - tail.y).toFixed(3),
+      groundDy: +(gNose - gTail).toFixed(3),
+      noseGap: +(nose.y - gNose).toFixed(3),
+      tailGap: +(tail.y - gTail).toFixed(3),
     };
   });
   console.log(`brake while holding ${key.toUpperCase()}:`, JSON.stringify(r));

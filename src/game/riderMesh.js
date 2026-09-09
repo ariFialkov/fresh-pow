@@ -152,6 +152,10 @@ export function createRider(gear, helmetColor) {
   const gearGroup = buildGear(gear);
   // boards ride a touch higher so the deck never vanishes into the snow
   if (isBoard) gearGroup.position.y = 0.07;
+  // yaw first, then pitch/roll in the yawed frame: rotation.x pitches about
+  // the BOARD's own lateral axis and rotation.z rolls its long axis, however
+  // far the deck has swung (needed to keep a checked board flush)
+  gearGroup.rotation.order = 'YXZ';
   rig.add(gearGroup);
 
   // ---- rigged character (uploaded model), reskinned per instance ----
@@ -599,14 +603,22 @@ export function setPose(rider, p = {}) {
   if (!isSled) {
     // skis pivot across the slope to scrub; the board instead noses INTO the
     // turn slightly ahead of the body, so the deck reads as leading the carve
-    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.2 : 1.3) + steer * (isBoard ? 0.16 : -0.12), 12, 0.8);
-    if (isBoard) {
-      // the rig roll above banks the whole prefab — including the deck, which
-      // looked fake. Counter-roll the board so it glides flat on the snow,
-      // keeping only a slight edge tilt into the carve; a brake check digs
-      // the deck onto its UPHILL edge (deck top tips away from the hill)
-      RZ(rider.gearGroup, steer * 0.44 * (1 - tuck * 0.25) * (1 - bk * 0.6) - brakeLean - bk * (rider._edgeLean ?? 1) * 0.22 - swayB * 0.3, 7, 0.6);
-    }
+    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.57 : 1.45) + steer * (isBoard ? 0.16 : -0.12), 12, 0.8);
+    // The body's roll is about the RIG's forward axis; once the gear has
+    // swung toward perpendicular that roll geometrically turns into fore-aft
+    // PITCH on the deck — which is why a checked board used to nose into the
+    // hill. Cancel the live rig roll in the BOARD's own axes (cos -> roll,
+    // sin -> pitch), keeping just a small dug-edge tilt, so the deck stays
+    // flush with tips level at 90 degrees. Knocked riders tumble whole.
+    const gy = rider.gearGroup.rotation.y;
+    const rr = rider.rig.rotation.z;
+    // boards always glide decoupled from the body bank; skis edge with the
+    // body through carves and only decouple while checked sideways
+    const cancelW = (1 - knocked) * (isBoard ? 1 : bk);
+    const dugEdge = -bk * (rider._edgeLean ?? 1) * (isBoard ? 0.22 : 0.15);
+    const carveEdge = isBoard ? -steer * 0.14 * (1 - tuck * 0.25) * (1 - bk * 0.6) : 0;
+    RZ(rider.gearGroup, (carveEdge + dugEdge - rr * Math.cos(gy)) * cancelW, 7, 0.6);
+    RX(rider.gearGroup, rr * Math.sin(gy) * cancelW, 9, 0.7);
   } else {
     RY(rider.gearGroup, bkYaw * 0.25);
   }
