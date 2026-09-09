@@ -22,6 +22,17 @@ const BOOTH_SX = 0.052;
 const BOOTH_SY = 0.036;
 const BOOTH_SZ = 0.032;
 
+const ledTex = (w, h, draw) => {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  draw(ctx, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+};
+
 export class StartGate {
   constructor(terrain) {
     this.terrain = terrain;
@@ -56,6 +67,57 @@ export class StartGate {
     this.pav = pav;
     this.hideZ = frontZ - 1.5;
 
+    // ---- LED screens filling the pavilion's blank display shells. The big
+    // center shell (model x -19.5..20.1, y -2..8.4 sloping z 16.8..22.6,
+    // face normal down-forward) gets a full-width ticker ribbon cycling the
+    // lined-up racers; the tilted fascia band beside it carries flashing
+    // START signs in the clear stretches between its columns ----
+    this.screens = new THREE.Group();
+    this.accA = '#' + new THREE.Color(theme.eventA ?? 0xd6452f).getHexString();
+    this.accB = '#' + new THREE.Color(theme.eventB ?? 0xf5d76e).getHexString();
+    this.tickerTex = null;
+    this.tickerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const ticker = new THREE.Mesh(new THREE.PlaneGeometry(15.0, 1.84), this.tickerMat);
+    const tickerTilt = Math.atan((5.8 * PAV_SZ) / (10.4 * PAV_SY));
+    ticker.rotation.order = 'YXZ';
+    ticker.rotation.set(tickerTilt, Math.PI, 0);
+    ticker.position.set(
+      cx - 0.3 * PAV_SX,
+      pavY + 33.6 * PAV_SY - Math.sin(tickerTilt) * 0.09,
+      pz - 20.3 * PAV_SZ - Math.cos(tickerTilt) * 0.09,
+    );
+    this.screens.add(ticker);
+    this.sideSignMats = [];
+    // side screen shells: model x +-(29.5..43.6), y -2.6..8.5, z 18.4..23.2
+    const signTilt = Math.atan((4.8 * PAV_SZ) / (11.1 * PAV_SY));
+    for (const side of [-1, 1]) {
+      const signMat = new THREE.MeshBasicMaterial({
+        map: ledTex(512, 172, (ctx, w, h) => {
+          ctx.fillStyle = '#0a0e16';
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = this.accA;
+          ctx.lineWidth = 10;
+          ctx.strokeRect(8, 8, w - 16, h - 16);
+          ctx.font = 'bold 108px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = this.accB;
+          ctx.fillText('START', w / 2, h / 2 + 6);
+        }),
+      });
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.55), signMat);
+      sign.rotation.order = 'YXZ';
+      sign.rotation.set(signTilt, Math.PI, 0);
+      sign.position.set(
+        cx + side * 36.5 * PAV_SX,
+        pavY + 33.45 * PAV_SY - Math.sin(signTilt) * 0.09,
+        pz - 20.8 * PAV_SZ - Math.cos(signTilt) * 0.09,
+      );
+      this.screens.add(sign);
+      this.sideSignMats.push(signMat);
+    }
+    this.group.add(this.screens);
+
     // pyro from the pavilion's front roof line, smoke machines at its sides
     this.smokers = [];
     this.pyroPorts = [];
@@ -82,11 +144,23 @@ export class StartGate {
       color: palette.trim,
       emissive: palette.trim.clone().multiplyScalar(0.35),
     });
+    this.laneScreens = [];
     for (const lane of lanes) {
       const bx = lane.x + 3.1 * BOOTH_SX; // center the lane opening, not the model
       const booth = createProp('start_gate', theme);
       booth.scale.set(BOOTH_SX, BOOTH_SY, BOOTH_SZ);
       booth.position.set(bx, deckY - 0.12, boothZ);
+      // the kiosk towers carry small screen plates facing the rider (model
+      // x -41.7..-30.2 and 24..35.3, y 25.5..51.9, z 4.2) — lit up with the
+      // lane number and, once someone lines up, their name
+      const laneNo = this.laneScreens.length + 1;
+      const kioskMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      for (const tx of [-35.95, 29.65]) {
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(11 * BOOTH_SX, 25 * BOOTH_SY), kioskMat);
+        screen.position.set(bx + tx * BOOTH_SX, deckY - 0.12 + 38.7 * BOOTH_SY, boothZ + 4.2 * BOOTH_SZ + 0.035);
+        this.group.add(screen);
+      }
+      this.laneScreens.push({ mat: kioskMat, no: laneNo, name: null });
       // stopper bar hung off the right hub post, spanning the opening
       const pivot = new THREE.Group();
       pivot.position.set(11.2, 43.4, 3.6);
@@ -115,9 +189,76 @@ export class StartGate {
     }
     this.screenMat = new THREE.MeshBasicMaterial({ color: 0x0d2233 }); // kept for the phase pulse
 
+    this.setRoster([]);
+
     this.group.traverse((o) => {
       if (o.isMesh) o.castShadow = true;
     });
+  }
+
+  /**
+   * Redraw the ticker + lane screens for the riders currently lined up.
+   * @param {(string|null)[]} names racer name per lane (null = empty gate)
+   */
+  setRoster(names) {
+    const lineup = names.filter(Boolean);
+    const text = 'RACE STARTING  •  ' + (lineup.length ? lineup.join('  •  ') + '  •  ' : '');
+    this.tickerTex?.dispose();
+    this.tickerTex = ledTex(2048, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#0a0e16';
+      ctx.fillRect(0, 0, w, h);
+      for (let x = 0; x < w; x += 32) {
+        for (const y of [0, h - 26]) {
+          ctx.fillStyle = (x / 32) % 2 ? '#e8edf4' : '#12161e';
+          ctx.fillRect(x, y, 32, 26);
+        }
+      }
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = this.accB;
+      // pick a font size whose whole number of copies tiles the canvas with
+      // little distortion — the scroll then wraps seamlessly
+      let font = 130, tw = 0, k = 1, scale = 1;
+      for (; font >= 56; font -= 8) {
+        ctx.font = `bold ${font}px sans-serif`;
+        tw = ctx.measureText(text).width;
+        k = Math.max(1, Math.round(w / tw));
+        scale = w / (k * tw);
+        if (scale >= 0.85 && scale <= 1.25) break;
+      }
+      ctx.setTransform(scale, 0, 0, 1, 0, 0);
+      for (let i = 0; i < k; i++) ctx.fillText(text, i * tw, h / 2 + 8);
+    });
+    this.tickerTex.wrapS = THREE.RepeatWrapping;
+    this.tickerMat.map = this.tickerTex;
+    this.tickerMat.needsUpdate = true;
+    for (const [i, s] of this.laneScreens.entries()) {
+      const name = names[i] ?? null;
+      if (s.mat.map && s.name === name) continue;
+      s.name = name;
+      s.mat.map?.dispose();
+      s.mat.map = ledTex(128, 256, (ctx, w, h) => {
+        ctx.fillStyle = '#0a0e16';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = this.accA;
+        ctx.lineWidth = 6;
+        ctx.strokeRect(5, 5, w - 10, h - 10);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = this.accB;
+        ctx.font = 'bold 110px sans-serif';
+        ctx.fillText(String(s.no), w / 2, name ? 128 : 150);
+        if (name) {
+          ctx.fillStyle = '#e8edf4';
+          let size = 30;
+          ctx.font = `bold ${size}px sans-serif`;
+          while (size > 14 && ctx.measureText(name).width > w - 18) {
+            size -= 2;
+            ctx.font = `bold ${size}px sans-serif`;
+          }
+          ctx.fillText(name, w / 2, 200);
+        }
+      });
+      s.mat.needsUpdate = true;
+    }
   }
 
   /** 'idle' (red) -> 'set' (amber) -> 'go' (green + bars drop + pyro). */
@@ -134,7 +275,15 @@ export class StartGate {
    * @param {number} camZ   camera world z (omit to always show the pavilion)
    */
   update(dt, t, fx, pyro, camZ) {
-    if (camZ !== undefined) this.pav.visible = camZ < this.hideZ;
+    if (camZ !== undefined) {
+      const vis = camZ < this.hideZ;
+      this.pav.visible = vis;
+      this.screens.visible = vis;
+    }
+    // ticker crawl + START sign flash (frantic once the race is on)
+    if (this.tickerTex) this.tickerTex.offset.x += dt * 0.045;
+    const flash = 0.66 + 0.34 * Math.sin(t * (this.phase === 'go' ? 11 : 2.6));
+    for (const m of this.sideSignMats) m.color.setScalar(flash);
     // LED chase pulse; frantic once the race is on
     const pulse = 0.5 + 0.5 * Math.sin(t * (this.phase === 'go' ? 9 : 2.1));
     this.ledMat.color.setHSL(0.55, 0.9, 0.3 + pulse * 0.35);

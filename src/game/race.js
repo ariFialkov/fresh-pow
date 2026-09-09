@@ -51,6 +51,9 @@ export class RaceScene {
     this.pyro = new SprayPool(this.scene, 320, { color: [1, 0.7, 0.3], blending: THREE.AdditiveBlending, gravity: 5 });
     this.gate = new StartGate(this.terrain);
     this.scene.add(this.gate.group);
+    const laneNames = [null, null, 'You', null, null];
+    for (const b of opts.bots) laneNames[b.lane] = b.identity.name;
+    this.gate.setRoster(laneNames);
     this.player = new Player(this.terrain, opts.gear, input, this.hud);
     this.player.fx = this.fx;
     const playerLane = this.terrain.gateLanes[2];

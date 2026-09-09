@@ -46,6 +46,8 @@ export class MenuScene {
     this.snow = new Snowfall(this.scene, 350);
     this.gate = new StartGate(this.terrain);
     this.scene.add(this.gate.group);
+    this._laneNames = [null, null, 'You', null, null]; // gate LED screens
+    this.gate.setRoster(this._laneNames);
     this.fx = new SprayPool(this.scene, 220); // ambient smoke-machine wisps
 
     // lane 2 (center) is the player's; bots take the rest
@@ -121,6 +123,8 @@ export class MenuScene {
         this.scene.add(rider.root);
         this.botRiders.push(rider);
         this.hud.addRider({ name: j.identity.name, color: j.identity.color, gearName: j.gear.name });
+        this._laneNames[j.lane] = j.identity.name;
+        this.gate.setRoster(this._laneNames);
       }
     }
 

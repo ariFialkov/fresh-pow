@@ -91,12 +91,30 @@ for (const id of ['start_gate', 'pavilion']) {
       slabComps.push(allComps[allComps.length - 1]);
     }
   }
+  // mean normals of the wide front panels (screen shells)
+  const shellNormals = [];
+  const srcN2 = geo.attributes.normal;
+  for (const c of comps.values()) {
+    const size = c.box.getSize(new THREE.Vector3());
+    if (size.x < 25 || c.box.max.z < 14) continue;
+    if (size.y < 5 || size.y > 16) continue;
+    const n = new THREE.Vector3();
+    for (const t of c.tris) {
+      for (let k = 0; k < 3; k++) n.add(new THREE.Vector3().fromBufferAttribute(srcN2, t * 3 + k));
+    }
+    n.normalize();
+    shellNormals.push({
+      min: c.box.min.toArray().map((v) => +v.toFixed(1)),
+      max: c.box.max.toArray().map((v) => +v.toFixed(1)),
+      n: n.toArray().map((v) => +v.toFixed(2)),
+    });
+  }
   info[id] = {
     box: { min: mBox.min.toArray().map((v) => +v.toFixed(1)), max: mBox.max.toArray().map((v) => +v.toFixed(1)) },
     comps: comps.size,
     wands,
     slabComps,
-    allComps,
+    shellNormals,
   };
 
   const scene = new THREE.Scene();
