@@ -772,7 +772,7 @@ export function setPose(rider, p = {}) {
   const mix = (u, v, k) => u + (v - u) * k;
   if (!rider._plant) rider._plant = { t: [0, 0], prevSteer: 0 };
   const P = rider._plant;
-  const PLANT_DUR = 0.55;
+  const PLANT_DUR = 0.85; // full cycle: punch, planted pivot, lift-recover
   P.t[0] = Math.max(0, P.t[0] - dt);
   P.t[1] = Math.max(0, P.t[1] - dt);
   if (rider.type === 'ski' && !idle && !airborne && tuck < 0.4 && brake < 0.3 && knocked < 0.2) {
@@ -845,12 +845,22 @@ export function setPose(rider, p = {}) {
     // poles dangle loose behind the hands at cruise (that thrown-away flowy
     // look), sweep flat back-uphill in a tuck, and swing forward to stab on
     // a plant. The soft spring lets them lag and swing like dead weight.
-    const env = plantEnv[i];
     // rig-frame targets (the holder's Y-flip makes POSITIVE rx swing the
     // tip backward-uphill): near-vertical at a standstill, trailing
-    // down-back at cruise, flat back in a tuck, stabbing ahead on a plant
+    // down-back at cruise, flat back in a tuck.
+    // The plant is a ONE-WAY cycle, never retracing: punch forward to the
+    // stab, then pivot BACKWARD past the body while the tip is planted
+    // (the skier passes the pole), then lift and recover to the hang from
+    // behind — the lingering-behind look of a real plant.
+    let off = 0;
+    if (P.t[i] > 0) {
+      const u = 1 - P.t[i] / PLANT_DUR;
+      if (u < 0.26) off = -1.5 * (u / 0.26); // punch to the stab
+      else if (u < 0.72) off = -1.5 + 2.45 * ((u - 0.26) / 0.46); // planted: sweep past
+      else off = 0.95 * (1 - (u - 0.72) / 0.28); // lift, settle from behind
+    }
     const hang = idle ? 0.55 : 1.15;
-    RX(pole, mix(hang, 2.1, tuck) - longG * 0.3 - env * 1.35, 4.5, 0.38);
+    RX(pole, mix(hang, 2.1, tuck) - longG * 0.3 + off, 4.5, 0.38);
   }
   applySkeleton(rider);
 }
