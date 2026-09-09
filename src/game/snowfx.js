@@ -168,14 +168,17 @@ export class GearTrails {
     // pours out of the vehicle instead of appearing underneath the body.
     // wMax = the track's half-width once the gear is fully sideways in a
     // brake check — a perpendicular board presses a board-LENGTH swath.
+    // tails sit UNDER the rear of the gear (not at or past its end): the
+    // ribbon's constantly regenerating leading edge stays hidden beneath the
+    // deck/skis/hull, so only settled track ever shows behind the rider
     const specs =
       gear.type === 'ski'
-        ? [{ off: -0.175, w: 0.065, wMax: 0.5, tail: 0.8 }, { off: 0.175, w: 0.065, wMax: 0.5, tail: 0.8 }]
+        ? [{ off: -0.175, w: 0.065, wMax: 0.5, tail: 0.45 }, { off: 0.175, w: 0.065, wMax: 0.5, tail: 0.45 }]
         : gear.type === 'board'
-          ? [{ off: 0, w: 0.16, wMax: 0.62, tail: 0.62 }]
+          ? [{ off: 0, w: 0.16, wMax: 0.62, tail: 0.32 }]
           : gear.id === 'sled-saucer'
-            ? [{ off: 0, w: 0.36, wMax: 0.4, tail: 0.6 }]
-            : [{ off: -0.21, w: 0.045, wMax: 0.1, tail: 0.75 }, { off: 0.21, w: 0.045, wMax: 0.1, tail: 0.75 }];
+            ? [{ off: 0, w: 0.36, wMax: 0.4, tail: 0.25 }]
+            : [{ off: -0.21, w: 0.045, wMax: 0.1, tail: 0.42 }, { off: 0.21, w: 0.045, wMax: 0.1, tail: 0.42 }];
     this.tracks = specs.map((s) => ({ ...s, trail: new Trail(scene, terrain, s.w) }));
   }
 
