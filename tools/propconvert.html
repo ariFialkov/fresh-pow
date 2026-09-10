@@ -27,7 +27,7 @@ const loader = new FBXLoader();
 const outScene = new THREE.Scene();
 const report = {};
 
-for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers', 'ski_lift', 'barrier']) {
+for (const id of ['start_gate', 'pavilion', 'finish_line', 'podium', 'bleachers', 'ski_lift', 'barrier', 'log_small', 'log_hollow']) {
   const obj = await loader.loadAsync(`/models/prop_${id}.fbx`);
   obj.updateMatrixWorld(true);
   let src = null;

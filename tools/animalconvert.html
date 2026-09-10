@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><base href="/" /><title>animal convert</title></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// Textured animal prefabs (Meshy exports): bake transforms, merge submeshes,
+// normalize to a real-world height with feet on y=0, keep UVs, attach the
+// base-color texture downscaled to 512, and export one animals.glb with a
+// mesh named animal_<venue> per species. Preview renders come back too so
+// facing direction can be verified.
+const TARGET_H = { vermont: 1.6, quebec: 2.6, colorado: 2.2 };
+
+const b64 = (buf) => {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+// swallow the FBX's own texture references — we attach our own
+const manager = new THREE.LoadingManager();
+manager.setURLModifier((url) => (/\.(png|jpg|jpeg|tga)$/i.test(url) ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' : url));
+const loader = new FBXLoader(manager);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(480, 360);
+document.body.appendChild(renderer.domElement);
+
+const outScene = new THREE.Scene();
+const shots = {};
+const report = {};
+
+for (const venue of Object.keys(TARGET_H)) {
+  const obj = await loader.loadAsync(`/assets-src/animals/${venue}.fbx`);
+  obj.updateMatrixWorld(true);
+  const geos = [];
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    let g = o.geometry.clone().applyMatrix4(o.matrixWorld);
+    if (g.index) g = g.toNonIndexed();
+    // keep only position/normal/uv so merging never fails on attribute sets
+    for (const name of Object.keys(g.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+    }
+    geos.push(g);
+  });
+  const geo = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+
+  // normalize: feet on y=0, centered, uniform scale to the real height
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const size = bb.getSize(new THREE.Vector3());
+  const k = TARGET_H[venue] / size.y;
+  geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  geo.scale(k, k, k);
+
+  // base color texture, downscaled
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = `/assets-src/animals/${venue}.png`;
+  });
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  c.getContext('2d').drawImage(img, 0, 0, 512, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = false; // glTF convention
+  const mat = new THREE.MeshStandardMaterial({ map: tex });
+  mat.name = 'animal';
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = `animal_${venue}`;
+  outScene.add(mesh);
+  report[venue] = { tris: geo.attributes.position.count / 3, height: +TARGET_H[venue] };
+
+  // preview renders (texture needs flipY=true for direct canvas draw, so
+  // render with a cloned texture)
+  const pvTex = new THREE.CanvasTexture(c);
+  pvTex.colorSpace = THREE.SRGBColorSpace;
+  const pvScene = new THREE.Scene();
+  pvScene.background = new THREE.Color(0x8798ab);
+  pvScene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 1.2));
+  const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
+  sun.position.set(3, 5, 4);
+  pvScene.add(sun);
+  const pv = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: pvTex }));
+  pvScene.add(pv);
+  const d = TARGET_H[venue];
+  for (const [tag, px, pz] of [['front', 0, d * 2.4], ['side', d * 2.4, 0]]) {
+    const cam = new THREE.PerspectiveCamera(45, 480 / 360, 0.1, 100);
+    cam.position.set(px, d * 0.75, pz);
+    cam.lookAt(0, d * 0.45, 0);
+    renderer.render(pvScene, cam);
+    shots[`${venue}_${tag}`] = renderer.domElement.toDataURL('image/png').split(',')[1];
+  }
+}
+
+const exporter = new GLTFExporter();
+const glb = await exporter.parseAsync(outScene, { binary: true });
+window.__result = JSON.stringify({ report, shots, glb: b64(glb) });
+document.title = 'done';
+</script>
+</body>
+</html>

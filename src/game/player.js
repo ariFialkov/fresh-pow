@@ -205,13 +205,53 @@ export class Player {
       this.speed = Math.max(0, this.speed + a * dt);
 
       // ---- move & follow / leave the ground ----
-      const nx = this.pos.x + dir.x * this.speed * dt;
+      let nx = this.pos.x + dir.x * this.speed * dt;
       const nz = this.pos.z + dir.z * this.speed * dt;
+
+      // cliffside ledge faces are solid from below: pushing into the wall
+      // stops you dead against it (sliding along it is fine); from on top
+      // the edge stays a clean drop-off
+      for (const wall of t.ledgeWallsAt(-nz)) {
+        const before = (this.pos.x - wall.x) * wall.side;
+        const after = (nx - wall.x) * wall.side;
+        if (before < 0.05 && after > -0.35) {
+          nx = wall.x - wall.side * 0.4;
+          this.speed *= Math.abs(dir.z) * 0.85; // keep only the along-wall run
+        }
+      }
+
       const ground = t.heightAt(nx, nz);
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
       this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
 
-      if (ground < this.pos.y - 0.55 && this.speed > 6) {
+      // half-pipe lip: carrying speed up the near-vertical wall boosts you
+      // off the lip — outward momentum converts to straight-up pop, so the
+      // arc drops you back down flush with the wall you left
+      const pp = t.pipeAt(nx, -nz);
+      let lipLaunch = false;
+      if (pp && Math.abs(pp.q) >= 0.97 && this._prevPipeQ != null && Math.abs(this._prevPipeQ) < 0.97
+          && this.groundVy > 3 && this.speed > 7) {
+        lipLaunch = true;
+        this.airborne = true;
+        this.vy = clamp(this.groundVy * 0.9, 5, 13);
+        if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
+          this.vy += 4.2;
+          if (this.hud) this.hud.trickToast('POP!', 'off the lip');
+        }
+        // bleed the outward lateral speed; keep the downhill run
+        const out = Math.sign(pp.q);
+        let vx = dir.x * this.speed;
+        const vz = dir.z * this.speed;
+        if (vx * out > 0) vx *= 0.15;
+        this.speed = Math.hypot(vx, vz);
+        this.travelYaw = Math.atan2(vx, -vz);
+        this.pos.set(nx, this.pos.y + this.vy * dt, nz);
+      }
+      this._prevPipeQ = pp ? pp.q : null;
+
+      if (lipLaunch) {
+        // airborne now — skip ground follow, collisions come back on landing
+      } else if (ground < this.pos.y - 0.55 && this.speed > 6) {
         // ground fell away — takeoff
         this.airborne = true;
         this.vy = clamp(this.groundVy, 0, 9);
@@ -229,6 +269,7 @@ export class Player {
       if (!this.airborne) this._collide();
     } else {
       // ---- air ----
+      this._prevPipeQ = null; // re-arm the lip launch only from riding, not landing
       this.vy -= AIR_G * dt;
       this.speed = Math.max(0, this.speed - DRAG_K * 0.4 * this.speed * this.speed * dt);
       const nx = this.pos.x + dir.x * this.speed * dt;
@@ -386,7 +427,7 @@ export class Player {
       const dz = this.pos.z - o.z;
       const r = o.r + 0.7;
       if (dx * dx + dz * dz < r * r) {
-        this.stumble(o.kind === 'tree' ? 'clipped a tree' : 'hit a boulder');
+        this.stumble(o.kind === 'tree' ? 'clipped a tree' : o.kind === 'log' ? 'slammed a log' : 'hit a boulder');
         // shove clear so we don't re-trigger
         const d = Math.max(0.1, Math.hypot(dx, dz));
         this.pos.x += (dx / d) * 1.2;

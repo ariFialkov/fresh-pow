@@ -12,6 +12,7 @@ import { StartGate } from './startgate.js';
 import { mulberry32, smoothstep } from './rng.js';
 import { drawOutcome, multiplierFor, EVENTS } from './rtp.js';
 import { THEMES } from './themes.js';
+import { Animals } from './animals.js';
 import { state, save } from './state.js';
 
 export class RaceScene {
@@ -51,6 +52,7 @@ export class RaceScene {
     this.pyro = new SprayPool(this.scene, 320, { color: [1, 0.7, 0.3], blending: THREE.AdditiveBlending, gravity: 5 });
     this.gate = new StartGate(this.terrain);
     this.scene.add(this.gate.group);
+    this.animals = new Animals(this.scene, this.terrain, this.event.theme, opts.seed);
     const laneNames = [null, null, 'You', null, null];
     for (const b of opts.bots) laneNames[b.lane] = b.identity.name;
     this.gate.setRoster(laneNames);
@@ -202,6 +204,7 @@ export class RaceScene {
       }
     }
 
+    this.animals.update(dt, this.player.progress, this.player);
     this.fx.update(dt);
     this.pyro.update(dt);
     this.gate.update(dt, this.time, this.fx, null, this.camera.position.z); // pyro lives at the finish now

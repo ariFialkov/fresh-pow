@@ -17,8 +17,20 @@ export async function loadProps() {
   propRoot = gltf.scene;
 }
 
-/** The four bucket colors for a venue theme. */
-export function propPalette(theme) {
+// organic props wear wood tones keyed to the venue's trees, not event steel
+const WOODY = new Set(['log_small', 'log_hollow']);
+
+/** The four bucket colors for a venue theme (wood tones for organic props). */
+export function propPalette(theme, id) {
+  if (id && WOODY.has(id)) {
+    const bark = new THREE.Color(theme.trunk ?? 0x5a4630);
+    return {
+      structure: bark.clone().multiplyScalar(0.9),
+      secondary: bark.clone().lerp(new THREE.Color(0xc9b795), 0.4),
+      panel: new THREE.Color(0xc9b083), // cut faces / heartwood
+      trim: new THREE.Color(0xf4f8fd), // snow dusting
+    };
+  }
   const secondary = new THREE.Color(0xaab4bf).lerp(new THREE.Color(theme.snow), 0.25);
   return {
     structure: new THREE.Color(0x2e3542).lerp(new THREE.Color(theme.fog), 0.12),
@@ -50,8 +62,8 @@ function bucketMat(name, palette, paletteKey) {
  */
 export function createProp(id, theme, scale = 1) {
   const src = propRoot.getObjectByName(id);
-  const palette = propPalette(theme);
-  const paletteKey = `${theme.snow}:${theme.eventA}`;
+  const palette = propPalette(theme, id);
+  const paletteKey = `${WOODY.has(id) ? 'wood' : 'evt'}:${theme.snow}:${theme.eventA}`;
   // wrap the clone: quantized GLBs carry a compensating scale on the mesh
   // node itself, so instance scaling must live on a parent, never overwrite it
   const inner = src.clone();

@@ -106,7 +106,7 @@ export class Terrain {
         !this.bridges.some((b) => b.s > ps - 55 && b.s < pe + 60) &&
         !this.spines.some((sp) => ps < sp.s1 + 30 && pe > sp.s0 - 30);
       if (clear) {
-        this.pipes.push({ s0: ps, s1: pe, off: (rng() - 0.5) * 14, w: 10 + rng() * 3, d: 3.8 + rng() * 1.2 });
+        this.pipes.push({ s0: ps, s1: pe, off: (rng() - 0.5) * 12, w: 13 + rng() * 2, d: 6.8 + rng() * 1.2 });
       }
     }
 
@@ -175,7 +175,7 @@ export class Terrain {
     // scatter guards: keep hazards out of the half-pipe channel and off the
     // sheer ledge faces
     const inPipe = (x, ts) =>
-      this.pipes.some((p) => ts > p.s0 - 25 && ts < p.s1 + 25 && Math.abs(x - (this.centerAt(ts) + p.off)) < p.w * 1.7);
+      this.pipes.some((p) => ts > p.s0 - 30 && ts < p.s1 + 30 && Math.abs(x - (this.centerAt(ts) + p.off)) < p.w * 2.1);
     const onLedgeFace = (x, ts) =>
       this.ledges.some((L) => {
         if (ts < L.s0 - 20 || ts > L.s1 + 20) return false;
@@ -247,6 +247,48 @@ export class Terrain {
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
     }
+    // 5) downed timber: small logs to slalom around, and massive hollow
+    // logs laid down the fall line — ride straight through the bore, but
+    // the flanks hit like any trunk
+    this.logs = [];
+    const nLogs = 7 + Math.floor(rng() * 5);
+    for (let i = 0; i < nLogs; i++) {
+      const ts = 180 + rng() * (COURSE.length - 360);
+      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.15;
+      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
+      const rot = rng() * Math.PI * 2;
+      const sc = 0.038 + rng() * 0.018; // 3.8-5.6 m trunks
+      this.logs.push({ x, z: -ts, rot, sc, kind: 'log_small' });
+      for (const a of [-30, 30]) {
+        // two collision pucks along the trunk axis (model x, rotated by rot)
+        this.obstacles.push({
+          x: x + Math.cos(rot) * a * sc,
+          z: -ts - Math.sin(rot) * a * sc,
+          r: 22 * sc,
+          kind: 'log',
+        });
+      }
+    }
+    for (let i = 0, want = 1 + (rng() < 0.55 ? 1 : 0); i < want; i++) {
+      const ts = 280 + rng() * (COURSE.length - 620);
+      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
+      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
+      const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
+      const sc = 0.105 + rng() * 0.02;
+      this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
+      // walls flank the bore; three pucks down each side, the middle clear
+      for (const side of [-1, 1]) {
+        for (const a of [-32, 0, 32]) {
+          this.obstacles.push({
+            x: x + Math.sin(rot) * a * sc + Math.cos(rot) * side * 21 * sc,
+            z: -ts - Math.cos(rot) * a * sc - Math.sin(rot) * side * 21 * sc,
+            r: 3 * sc + 0.2,
+            kind: 'log',
+          });
+        }
+      }
+    }
+
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
     this._treeXf = treeXf;
     this._rockXf = rockXf;
@@ -331,13 +373,19 @@ export class Terrain {
       }
     }
 
-    // natural half-pipe: sunken center, raised lips, smooth run-in/out
+    // natural half-pipe, superpipe scale: dished floor, circular transition
+    // into a near-vertical upper wall, crisp lip, flat deck, taper to grade
     for (const p of this.pipes) {
-      if (s > p.s0 - 30 && s < p.s1 + 30) {
-        const env = smoothstep(p.s0 - 25, p.s0 + 10, s) * (1 - smoothstep(p.s1 - 10, p.s1 + 25, s));
-        const q = (x - (c + p.off)) / p.w;
-        const aq = Math.abs(q);
-        const prof = aq <= 1 ? q * q - 0.55 : 0.45 * (1 - smoothstep(1, 1.6, aq));
+      if (s > p.s0 - 40 && s < p.s1 + 40) {
+        const env = smoothstep(p.s0 - 35, p.s0 + 14, s) * (1 - smoothstep(p.s1 - 14, p.s1 + 35, s));
+        const aq = Math.abs((x - (c + p.off)) / p.w);
+        let prof;
+        if (aq <= 0.4) prof = -0.6;
+        else if (aq < 1) {
+          const k = (aq - 0.4) / 0.6;
+          prof = -0.6 + k * k; // steepens toward ~65 deg at the lip
+        } else if (aq <= 1.35) prof = 0.4; // deck
+        else prof = 0.4 * (1 - smoothstep(1.35, 2, aq));
         h += p.d * env * prof;
       }
     }
@@ -373,6 +421,37 @@ export class Terrain {
     }
 
     return h;
+  }
+
+  /**
+   * Half-pipe lookup for the physics: q is the signed cross-pipe coordinate
+   * (|q|=1 at the lip), or null when (x, s) is not inside an active pipe.
+   */
+  pipeAt(x, s) {
+    for (const p of this.pipes) {
+      if (s < p.s0 - 35 || s > p.s1 + 35) continue;
+      const env = smoothstep(p.s0 - 35, p.s0 + 14, s) * (1 - smoothstep(p.s1 - 14, p.s1 + 35, s));
+      if (env < 0.55) continue;
+      return { q: (x - (this.centerAt(s) + p.off)) / p.w, env, p };
+    }
+    return null;
+  }
+
+  /**
+   * Cliffside ledge faces that act as solid walls at s: world x of each face
+   * and which side its shelf rises on (+1 / -1). Empty where the ledge has
+   * tapered low enough to ride over.
+   */
+  ledgeWallsAt(s) {
+    const out = [];
+    for (const L of this.ledges) {
+      if (s < L.s0 - 30 || s > L.s1 + 30) continue;
+      const env = smoothstep(L.s0 - 30, L.s0 + 15, s) * (1 - smoothstep(L.s1 - 15, L.s1 + 30, s));
+      if (env * L.h < 1.2) continue;
+      const face = L.uFace + noise1(s * 0.02, this.seed + 7) * 0.05;
+      out.push({ x: this.centerAt(s) + L.side * face * COURSE.halfWidth, side: L.side });
+    }
+    return out;
   }
 
   /** Central-difference surface normal. */
@@ -597,6 +676,20 @@ export class Terrain {
     });
     rocks.castShadow = true;
     group.add(rocks, rockSnow);
+
+    // downed timber props, sunk slightly so they sit bedded in the snow
+    for (const log of this.logs) {
+      const inst = createProp(log.kind, this.theme, log.sc);
+      // hollow logs bury their bottom wall so the bore floor sits just
+      // under the snow — you ride in at snow level
+      const sink = log.kind === 'log_hollow' ? 10 * log.sc + 0.1 : 0.28;
+      inst.position.set(log.x, this.heightAt(log.x, log.z) - sink, log.z);
+      inst.rotation.y = log.rot;
+      inst.traverse((o) => {
+        if (o.isMesh) o.castShadow = true;
+      });
+      group.add(inst);
+    }
 
     // course flags every ~90 m marking the line
     const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 4);
