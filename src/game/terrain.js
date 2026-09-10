@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
 import { createProp } from './props.js';
-import { customTree } from './trees.js';
+import { speciesTree } from './trees.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -455,17 +455,6 @@ export class Terrain {
     return out;
   }
 
-  /**
-   * Detailed venue trees draw only within fog range of the rider — the
-   * frustum alone can't cull a valley the camera looks straight down.
-   */
-  updateTreeCulling(playerS, fogFar) {
-    if (!this._treeChunks) return;
-    for (const c of this._treeChunks) {
-      c.mesh.visible = c.mid > playerS - 420 && c.mid < playerS + fogFar * 0.95;
-    }
-  }
-
   /** Central-difference surface normal. */
   normalAt(x, z, out = new THREE.Vector3()) {
     const e = 0.8;
@@ -613,44 +602,29 @@ export class Terrain {
     const up = new THREE.Vector3(0, 1, 0);
     const sc = new THREE.Vector3();
 
-    // venue tree prefab, when one was uploaded: trunk/foliage/snow parts
-    // tinted to the theme and instanced with the compensating node matrix
-    const custom = customTree(this.theme.key);
-    if (custom) {
-      const k = (this.theme.treeH ?? 7.5) / 100;
-      // chunk by course section so the frustum culls trees behind and far
-      // ahead — one full-course instanced mesh would always draw every tree
-      const CHUNK = 300;
-      const chunks = new Map();
-      // detailed trees cost real vertices: keep every collidable tree but
-      // thin the pure-scenery fillers outside the boundary
-      let drop = 0;
-      for (const t of this._treeXf) {
-        if (!t.co && ((drop = (drop + 1) % 5), drop < 2)) continue;
-        const ci = Math.floor(-t.z / CHUNK);
-        if (!chunks.has(ci)) chunks.set(ci, []);
-        chunks.get(ci).push(t);
-      }
-      this._treeChunks = [];
-      for (const [ci, list] of chunks.entries()) {
-        for (const part of custom) {
-          const mat = new THREE.MeshLambertMaterial({
-            color: part.name === 'trunk' ? this.theme.trunk : part.name === 'snow' ? 0xf4f8fd : this.theme.foliage,
-          });
-          const inst = new THREE.InstancedMesh(part.geometry, mat, list.length);
-          list.forEach((t, i) => {
-            const y = this.heightAt(t.x, t.z) - 0.2;
-            q.setFromAxisAngle(up, t.rot);
-            sc.setScalar(t.sc * k);
-            m.compose(new THREE.Vector3(t.x, y, t.z), q, sc);
-            m2.multiplyMatrices(m, part.nodeMatrix);
-            inst.setMatrixAt(i, m2);
-          });
-          inst.castShadow = part.name === 'trunk'; // foliage shadows would double the vertex load
-          inst.computeBoundingSphere();
-          group.add(inst);
-          this._treeChunks.push({ mid: ci * CHUNK + CHUNK / 2, mesh: inst });
-        }
+    // venue tree species: procedural geometry matched to the uploaded
+    // sculpt's silhouette, tinted and instanced like the default spruce
+    const species = speciesTree(this.theme);
+    if (species) {
+      const parts = [
+        [species.trunk, this.theme.trunk],
+        [species.foliage, this.theme.foliage],
+        [species.snow, 0xf4f8fd],
+      ];
+      for (const [geo, color] of parts) {
+        const inst = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color }), nTreesAll);
+        this._treeXf.forEach((t, i) => {
+          const y = this.heightAt(t.x, t.z) - 0.2;
+          q.setFromAxisAngle(up, t.rot);
+          // the species geometry is already full size — remap the spruce
+          // jitter (0.8-1.7) into a gentler grove variation
+          sc.setScalar(0.72 + (t.sc - 0.8) * 0.45);
+          m.compose(new THREE.Vector3(t.x, y, t.z), q, sc);
+          inst.setMatrixAt(i, m);
+        });
+        inst.castShadow = color !== 0xf4f8fd;
+        inst.computeBoundingSphere();
+        group.add(inst);
       }
       this._buildRocksAndFlags(group, m, q, up, sc);
       return;

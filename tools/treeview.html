@@ -4,54 +4,32 @@
 <body>
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { speciesTree } from '/src/game/trees.js';
+import { THEMES } from '/src/game/themes.js';
 
-// renders each converted tree with venue-ish tints for silhouette QA
-const TINTS = {
-  bc: { trunk: 0x4a3826, foliage: 0x1f4534 },
-  chile: { trunk: 0x6a5a40, foliage: 0x5d6b48 },
-  colorado: { trunk: 0x5a4630, foliage: 0x2e5d46 },
-  japan: { trunk: 0xd8d0c0, foliage: 0x3d5a4a },
-  nz: { trunk: 0x7a6a4a, foliage: 0x8a8250 },
-  quebec: { trunk: 0x4a3a28, foliage: 0x27503c },
-  utah: { trunk: 0x5a4630, foliage: 0x2e5d46 },
-  vermont: { trunk: 0x6b4a2e, foliage: 0x486b42 },
-  swiss: { trunk: 0x4f4030, foliage: 0x2a5240 },
-};
+// renders each generated species tree with its venue tints for QA
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(480, 560);
 document.body.appendChild(renderer.domElement);
-const loader = new GLTFLoader();
-loader.setMeshoptDecoder(MeshoptDecoder);
-const gltf = await loader.loadAsync('/models/trees.glb');
-gltf.scene.updateMatrixWorld(true);
 const shots = {};
-for (const [venue, tint] of Object.entries(TINTS)) {
-  const node = gltf.scene.getObjectByName(`tree_${venue}`);
+for (const [key, theme] of Object.entries(THEMES)) {
+  const sp = speciesTree(theme);
+  if (!sp) continue;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8798ab);
   scene.add(new THREE.HemisphereLight(0xdcecff, 0x9aa89b, 0.95));
   const sun = new THREE.DirectionalLight(0xfff0c8, 1.7);
-  sun.position.set(60, 110, 80);
+  sun.position.set(6, 11, 8);
   scene.add(sun);
-  // quantized attributes must never be baked — clone the node tree and
-  // swap materials in place, keeping the compensating node transforms
-  const inst = node.clone();
-  inst.traverse((o) => {
-    if (!o.isMesh) return;
-    const name = (Array.isArray(o.material) ? o.material[0] : o.material).name;
-    o.material = new THREE.MeshLambertMaterial({
-      color: name === 'trunk' ? tint.trunk : name === 'snow' ? 0xf4f8fd : tint.foliage,
-      side: THREE.DoubleSide,
-    });
-  });
-  scene.add(inst);
-  const cam = new THREE.PerspectiveCamera(40, 480 / 560, 1, 1000);
-  cam.position.set(95, 62, 140);
-  cam.lookAt(0, 46, 0);
+  scene.add(new THREE.Mesh(sp.trunk, new THREE.MeshLambertMaterial({ color: theme.trunk })));
+  scene.add(new THREE.Mesh(sp.foliage, new THREE.MeshLambertMaterial({ color: theme.foliage })));
+  scene.add(new THREE.Mesh(sp.snow, new THREE.MeshLambertMaterial({ color: 0xf4f8fd })));
+  const H = theme.treeH ?? 7.5;
+  const cam = new THREE.PerspectiveCamera(40, 480 / 560, 0.1, 200);
+  cam.position.set(H * 1.0, H * 0.62, H * 1.45);
+  cam.lookAt(0, H * 0.46, 0);
   renderer.render(scene, cam);
-  shots[venue] = renderer.domElement.toDataURL('image/png').split(',')[1];
+  shots[key] = renderer.domElement.toDataURL('image/png').split(',')[1];
 }
 window.__result = JSON.stringify(shots);
 </script>

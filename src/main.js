@@ -11,7 +11,6 @@ import { showEventRoller } from './game/hud.js';
 import { loadCharacters } from './game/characters.js';
 import { loadProps } from './game/props.js';
 import { loadAnimals } from './game/animals.js';
-import { loadTrees } from './game/trees.js';
 
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -115,7 +114,7 @@ renderer.setAnimationLoop(() => {
   loadEl.textContent = 'WAXING THE GEAR…';
   document.getElementById('ui').appendChild(loadEl);
   try {
-    await Promise.all([loadCharacters(), loadProps(), loadAnimals(), loadTrees()]);
+    await Promise.all([loadCharacters(), loadProps(), loadAnimals()]);
   } finally {
     loadEl.remove();
   }
