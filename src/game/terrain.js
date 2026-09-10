@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
 import { createProp } from './props.js';
+import { customTree } from './trees.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -138,7 +139,7 @@ export class Terrain {
     const addTree = (x, sPos, collides) => {
       const sc = 0.8 + rng() * 0.9;
       const z = -sPos;
-      treeXf.push({ x, z, sc, rot: rng() * Math.PI * 2 });
+      treeXf.push({ x, z, sc, rot: rng() * Math.PI * 2, co: collides });
       if (collides) this.obstacles.push({ x, z, r: 1.1 * sc, kind: 'tree' });
     };
     const addRock = (x, sPos, collides) => {
@@ -454,6 +455,17 @@ export class Terrain {
     return out;
   }
 
+  /**
+   * Detailed venue trees draw only within fog range of the rider — the
+   * frustum alone can't cull a valley the camera looks straight down.
+   */
+  updateTreeCulling(playerS, fogFar) {
+    if (!this._treeChunks) return;
+    for (const c of this._treeChunks) {
+      c.mesh.visible = c.mid > playerS - 420 && c.mid < playerS + fogFar * 0.95;
+    }
+  }
+
   /** Central-difference surface normal. */
   normalAt(x, z, out = new THREE.Vector3()) {
     const e = 0.8;
@@ -594,6 +606,56 @@ export class Terrain {
   }
 
   _buildInstances(group) {
+    const nTreesAll = this._treeXf.length;
+    const m = new THREE.Matrix4();
+    const m2 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const sc = new THREE.Vector3();
+
+    // venue tree prefab, when one was uploaded: trunk/foliage/snow parts
+    // tinted to the theme and instanced with the compensating node matrix
+    const custom = customTree(this.theme.key);
+    if (custom) {
+      const k = (this.theme.treeH ?? 7.5) / 100;
+      // chunk by course section so the frustum culls trees behind and far
+      // ahead — one full-course instanced mesh would always draw every tree
+      const CHUNK = 300;
+      const chunks = new Map();
+      // detailed trees cost real vertices: keep every collidable tree but
+      // thin the pure-scenery fillers outside the boundary
+      let drop = 0;
+      for (const t of this._treeXf) {
+        if (!t.co && ((drop = (drop + 1) % 5), drop < 2)) continue;
+        const ci = Math.floor(-t.z / CHUNK);
+        if (!chunks.has(ci)) chunks.set(ci, []);
+        chunks.get(ci).push(t);
+      }
+      this._treeChunks = [];
+      for (const [ci, list] of chunks.entries()) {
+        for (const part of custom) {
+          const mat = new THREE.MeshLambertMaterial({
+            color: part.name === 'trunk' ? this.theme.trunk : part.name === 'snow' ? 0xf4f8fd : this.theme.foliage,
+          });
+          const inst = new THREE.InstancedMesh(part.geometry, mat, list.length);
+          list.forEach((t, i) => {
+            const y = this.heightAt(t.x, t.z) - 0.2;
+            q.setFromAxisAngle(up, t.rot);
+            sc.setScalar(t.sc * k);
+            m.compose(new THREE.Vector3(t.x, y, t.z), q, sc);
+            m2.multiplyMatrices(m, part.nodeMatrix);
+            inst.setMatrixAt(i, m2);
+          });
+          inst.castShadow = part.name === 'trunk'; // foliage shadows would double the vertex load
+          inst.computeBoundingSphere();
+          group.add(inst);
+          this._treeChunks.push({ mid: ci * CHUNK + CHUNK / 2, mesh: inst });
+        }
+      }
+      this._buildRocksAndFlags(group, m, q, up, sc);
+      return;
+    }
+
     // trees: trunk + two foliage cones merged per-instance via two instanced meshes
     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1.5, 7);
     trunkGeo.translate(0, 0.75, 0);
@@ -628,10 +690,6 @@ export class Terrain {
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, nTrees);
     const foliage = new THREE.InstancedMesh(foliageGeo, foliageMat, nTrees);
     const treeSnow = new THREE.InstancedMesh(snowGeo, snowCapMat, nTrees);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const sc = new THREE.Vector3();
     this._treeXf.forEach((t, i) => {
       const y = this.heightAt(t.x, t.z) - 0.15;
       q.setFromAxisAngle(up, t.rot);
@@ -643,7 +701,11 @@ export class Terrain {
     });
     trunks.castShadow = foliage.castShadow = true;
     group.add(trunks, foliage, treeSnow);
+    this._buildRocksAndFlags(group, m, q, up, sc);
+  }
 
+  _buildRocksAndFlags(group, m, q, up, sc) {
+    const snowCapMat = new THREE.MeshLambertMaterial({ color: 0xf4f8fd });
     // craggy boulders: jittered icosahedron + a settled snow cap on top
     const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
     {

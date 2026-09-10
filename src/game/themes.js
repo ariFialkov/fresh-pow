@@ -75,3 +75,11 @@ export const THEMES = {
     hemiSky: 0x7a74b0, hemiGround: 0x3c3a56, hemiI: 0.75, sunCol: 0xbcc8ff, sunI: 1.0,
   },
 };
+
+// each theme knows its own key (props/trees/animals are keyed by venue)
+for (const [key, t] of Object.entries(THEMES)) t.key = key;
+// world height of the uploaded venue trees (normalized model height = 100)
+THEMES.bc.treeH = 11;
+THEMES.chile.treeH = 8.5;
+THEMES.colorado.treeH = 8;
+THEMES.japan.treeH = 7;

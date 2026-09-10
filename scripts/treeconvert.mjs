@@ -1,0 +1,18 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const server = await createServer({ server: { port: 4313, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+page.on('console', (m) => { if (m.type() === 'error') console.error('console:', m.text()); });
+await page.goto('http://localhost:4313/tools/treeconvert.html');
+await page.waitForFunction(() => !!window.__result, undefined, { timeout: 900000 });
+const { report, glb } = JSON.parse(await page.evaluate(() => window.__result));
+fs.writeFileSync('public/models/trees.glb', Buffer.from(glb, 'base64'));
+console.log('trees.glb', Math.round(Buffer.from(glb, 'base64').length / 1024), 'KB (pre-optimize)');
+console.log(JSON.stringify(report));
+await browser.close();
+await server.close();
+process.exit(0);

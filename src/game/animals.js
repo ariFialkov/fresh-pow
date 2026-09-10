@@ -38,6 +38,7 @@ const SPECIES = {
   chile: { label: 'a guanaco', herd: [3, 6], speed: 11, across: 5, r: 0.95, gallop: 7, bob: 0.3 },
   nz: { label: 'a sheep', herd: [5, 8], speed: 7.5, across: 3.5, r: 0.8, gallop: 6, bob: 0.22 },
   swiss: { label: 'an ibex', herd: [1, 2], speed: 9, across: 4.5, r: 0.9, gallop: 6.8, bob: 0.28 },
+  japan: { label: 'a fox', herd: [1, 2], speed: 11, across: 5.5, r: 0.55, gallop: 8.5, bob: 0.2 },
 };
 
 export class Animals {

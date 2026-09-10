@@ -149,6 +149,7 @@ export class MenuScene {
     this.camera.lookAt(lane.x, gy + 3.6, lane.z);
 
     this.gate.update(dt, this.t, this.fx, null);
+    this.terrain.updateTreeCulling(0, this.scene.fog?.far ?? 900);
     this.fx.update(dt);
     this.snow.update(dt, this.camera.position);
   }

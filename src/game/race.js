@@ -205,6 +205,7 @@ export class RaceScene {
     }
 
     this.animals.update(dt, this.player.progress, this.player);
+    this.terrain.updateTreeCulling(this.player.progress, this.scene.fog?.far ?? 900);
     this.fx.update(dt);
     this.pyro.update(dt);
     this.gate.update(dt, this.time, this.fx, null, this.camera.position.z); // pyro lives at the finish now

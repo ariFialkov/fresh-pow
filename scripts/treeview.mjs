@@ -1,0 +1,14 @@
+import { createServer } from 'vite';
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const server = await createServer({ server: { port: 4314, strictPort: true } });
+await server.listen();
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('pageerror:', e));
+await page.goto('http://localhost:4314/tools/treeview.html');
+await page.waitForFunction(() => !!window.__result, undefined, { timeout: 180000 });
+const shots = JSON.parse(await page.evaluate(() => window.__result));
+for (const [id, b64] of Object.entries(shots)) fs.writeFileSync(`scratch-tree-${id}.png`, Buffer.from(b64, 'base64'));
+console.log('previews:', Object.keys(shots).join(', '));
+await browser.close(); await server.close(); process.exit(0);
