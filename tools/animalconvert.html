@@ -13,7 +13,16 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // base-color texture downscaled to 512, and export one animals.glb with a
 // mesh named animal_<venue> per species. Preview renders come back too so
 // facing direction can be verified.
-const TARGET_H = { vermont: 1.6, quebec: 2.6, colorado: 2.2 };
+const TARGET_H = {
+  vermont: 1.6, // white-tailed deer (incl. antlers)
+  quebec: 2.6, // moose
+  colorado: 2.2, // elk
+  utah: 1.4, // bighorn sheep
+  bc: 1.35, // mountain goat
+  chile: 1.9, // guanaco (head up)
+  nz: 1.15, // merino sheep
+  swiss: 1.45, // alpine ibex (incl. horns)
+};
 
 const b64 = (buf) => {
   const bytes = new Uint8Array(buf);

@@ -33,6 +33,11 @@ const SPECIES = {
   vermont: { label: 'a deer', herd: [3, 5], speed: 10.5, across: 5.5, r: 0.85, gallop: 7.5, bob: 0.3 },
   quebec: { label: 'a moose', herd: [1, 1], speed: 8.5, across: 3.5, r: 1.4, gallop: 5.5, bob: 0.34 },
   colorado: { label: 'an elk', herd: [4, 6], speed: 10, across: 4.5, r: 1.1, gallop: 6.5, bob: 0.32 },
+  utah: { label: 'a bighorn', herd: [2, 4], speed: 9.5, across: 4.5, r: 0.9, gallop: 7, bob: 0.28 },
+  bc: { label: 'a mountain goat', herd: [1, 2], speed: 8.5, across: 4, r: 0.9, gallop: 6.5, bob: 0.28 },
+  chile: { label: 'a guanaco', herd: [3, 6], speed: 11, across: 5, r: 0.95, gallop: 7, bob: 0.3 },
+  nz: { label: 'a sheep', herd: [5, 8], speed: 7.5, across: 3.5, r: 0.8, gallop: 6, bob: 0.22 },
+  swiss: { label: 'an ibex', herd: [1, 2], speed: 9, across: 4.5, r: 0.9, gallop: 6.8, bob: 0.28 },
 };
 
 export class Animals {
