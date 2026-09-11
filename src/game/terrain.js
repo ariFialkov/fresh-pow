@@ -29,8 +29,8 @@ const TUBE = {
 
 /**
  * Bore and shell radius in metres at an along-axis offset from a tube's
- * anchor. `along` and the result are world units; the profile itself is
- * measured in model units, so it scales with the trunk.
+ * anchor, where `along` runs positive toward the uphill mouth (the model's
+ * +z). The profile is measured in model units, so it scales with the trunk.
  */
 export function tubeRadii(tb, along) {
   const a = clamp(along, -tb.halfL, tb.halfL) / tb.sc;
@@ -359,7 +359,7 @@ export class Terrain {
           sc: l.sc,
           halfL,
           axY0: l.axY0,
-          axSlope: (hUp - hDown) / (2 * halfL),
+          axSlope: (hUp - hDown) / (2 * halfL), // +along is the uphill mouth
         };
       });
 
@@ -819,6 +819,7 @@ export class Terrain {
         inst.rotation.order = 'YXZ';
         inst.rotation.set(-log.pitch, log.rot, 0);
         inst.position.set(log.x, log.posY, log.z);
+        inst.name = 'hollow_log'; // the collider probe measures this shell
       } else {
         inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
         const n = this.normalAt(log.x, log.z);
