@@ -321,6 +321,19 @@ export class Terrain {
       this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
+    // solid-shell data for the player physics: bore radius and outer shell
+    this.hollowTubes = this.logs
+      .filter((l) => l.kind === 'log_hollow')
+      .map((l) => ({
+        x: l.x,
+        s0: -l.z,
+        ax: Math.sin(l.rot),
+        az: Math.cos(l.rot),
+        halfL: 50 * l.sc,
+        R: 15 * l.sc,
+        outR: 23 * l.sc,
+      }));
+
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
     this._treeXf = treeXf;
     this._rockXf = rockXf;
@@ -521,6 +534,18 @@ export class Terrain {
       };
     }
     return null;
+  }
+
+  /** True within the short approach patch just uphill of a grind rail. */
+  nearGrindEntry(x, s) {
+    for (const g of this.grindLogs) {
+      const ds = s - g.s0;
+      const dx = x - g.x;
+      const along = ds * g.az + dx * g.ax;
+      if (along < -9 || along > 1.5) continue;
+      if (Math.abs(dx * g.az - ds * g.ax) < 2.5) return true;
+    }
+    return false;
   }
 
   /**

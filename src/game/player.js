@@ -175,9 +175,12 @@ export class Player {
       // drag & braking
       const tucking = inp.tuck && !stumbling;
       const braking = inp.brake && !stumbling;
-      const k = DRAG_K * (tucking ? TUCK_DRAG : 1) * (braking ? 4 : 1);
+      // right before a grind rail the brake sets the sideways stance
+      // without washing off the momentum you need to carry onto the log
+      const railApproach = braking && t.nearGrindEntry(this.pos.x, -this.pos.z);
+      const k = DRAG_K * (tucking ? TUCK_DRAG : 1) * (braking ? (railApproach ? 1.4 : 4) : 1);
       a -= k * this.speed * this.speed;
-      if (braking) a -= BRAKE_DECEL;
+      if (braking) a -= BRAKE_DECEL * (railApproach ? 0.18 : 1);
       if (stumbling) a -= 6;
       if (this.knockT > 0) a -= 10; // sliding on your side scrubs hard
 
@@ -203,13 +206,13 @@ export class Player {
       if (!this.isSled) a -= Math.abs(this.edge) * this.speed * (this.isBoard ? 0.058 : 0.046);
 
       // on a grind rail none of the snow physics bite — flat wood, light drag
-      if (this._grindT > 0) a = -2.4;
+      if (this._grindT > 0) a = -0.5; // wood barely bites
 
       this.speed = Math.max(0, this.speed + a * dt);
 
       // ---- move & follow / leave the ground ----
       let nx = this.pos.x + dir.x * this.speed * dt;
-      const nz = this.pos.z + dir.z * this.speed * dt;
+      let nz = this.pos.z + dir.z * this.speed * dt;
 
       // cliffside ledge faces are solid from below: pushing into the wall
       // stops you dead against it (sliding along it is fine); from on top
@@ -253,6 +256,9 @@ export class Player {
       }
 
       if (!grinding) {
+      // giant hollow trunks are solid — the bore wall contains you
+      ({ nx, nz } = this._tubeClamp(nx, nz, dir));
+
       const ground = t.heightAt(nx, nz);
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
       this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
@@ -306,8 +312,11 @@ export class Player {
       this._prevPipeQ = null; // re-arm the lip launch only from riding, not landing
       this.vy -= AIR_G * dt;
       this.speed = Math.max(0, this.speed - DRAG_K * 0.4 * this.speed * this.speed * dt);
-      const nx = this.pos.x + dir.x * this.speed * dt;
-      const nz = this.pos.z + dir.z * this.speed * dt;
+      let nx = this.pos.x + dir.x * this.speed * dt;
+      let nz = this.pos.z + dir.z * this.speed * dt;
+      // even airborne, a hollow trunk's walls stay solid — launching off the
+      // gutter can't carry you through the wood
+      ({ nx, nz } = this._tubeClamp(nx, nz, dir));
       const ny = this.pos.y + this.vy * dt;
       const ground = t.heightAt(nx, nz);
 
@@ -442,6 +451,35 @@ export class Player {
   }
 
   /** Flattened by another rider. Harsher than a stumble — you go down. */
+  /**
+   * Solid hollow-trunk shells: if the step from pos to (nx, nz) crosses a
+   * tube's inner bore wall (from inside) or outer shell (from outside),
+   * clamp to the wall and redirect the run along the tube axis.
+   */
+  _tubeClamp(nx, nz, dir) {
+    for (const tb of this.terrain.hollowTubes) {
+      const dsN = -nz - tb.s0;
+      const dxN = nx - tb.x;
+      const alongN = dsN * tb.az + dxN * tb.ax;
+      if (Math.abs(alongN) > tb.halfL) continue;
+      const latO = (this.pos.x - tb.x) * tb.az - (-this.pos.z - tb.s0) * tb.ax;
+      const latN = dxN * tb.az - dsN * tb.ax;
+      let clampLat = null;
+      if (Math.abs(latO) < tb.R && Math.abs(latN) >= tb.R - 0.05) {
+        clampLat = Math.sign(latN || 1) * (tb.R - 0.2);
+      } else if (Math.abs(latO) > tb.outR && Math.abs(latN) <= tb.outR + 0.05) {
+        clampLat = Math.sign(latO) * (tb.outR + 0.2);
+      }
+      if (clampLat == null) continue;
+      nx = tb.x + tb.ax * alongN + tb.az * clampLat;
+      nz = -(tb.s0 + tb.az * alongN - tb.ax * clampLat);
+      const alongVel = dir.x * tb.ax - dir.z * tb.az;
+      this.travelYaw = alongVel >= 0 ? Math.atan2(tb.ax, tb.az) : Math.atan2(-tb.ax, -tb.az);
+      this.speed *= Math.min(1, Math.abs(alongVel)) * 0.9;
+    }
+    return { nx, nz };
+  }
+
   knockDown(byName) {
     if (this.knockT > 0) return;
     this.knockT = 1.7;
