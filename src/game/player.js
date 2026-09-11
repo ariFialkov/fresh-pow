@@ -334,22 +334,6 @@ export class Player {
           this.speed *= 0.4;
         }
       }
-      // raised timber mid-flight: pop up into the bridge trunk and it knocks
-      // you straight back down
-      if (this.stumbleT <= 0) {
-        for (const o of t.obstaclesNear(-nz - 3, -nz + 3)) {
-          if (o.y == null || ny > o.y + o.r || ny + 1.7 < o.y - o.r) continue;
-          const dx = nx - o.x;
-          const dz = nz - o.z;
-          const r = o.r + 0.6;
-          if (dx * dx + dz * dz < r * r) {
-            this.vy = Math.min(this.vy, -1.5);
-            this.speed *= 0.4;
-            this.stumble('slammed a log');
-            break;
-          }
-        }
-      }
       const ground = t.groundAt(nx, nz);
 
       // animate tricks toward their targets
@@ -560,8 +544,6 @@ export class Player {
     if (this.stumbleT > 0) return;
     const s = this.progress;
     for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
-      // raised timber (the bridge trunk) only counts when the body reaches it
-      if (o.y != null && (this.pos.y > o.y + o.r || this.pos.y + 1.7 < o.y - o.r)) continue;
       const dx = this.pos.x - o.x;
       const dz = this.pos.z - o.z;
       const r = o.r + 0.7;

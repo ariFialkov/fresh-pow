@@ -296,29 +296,7 @@ export class Terrain {
         });
       }
     }
-    for (let i = 0, want = 1 + (rng() < 0.55 ? 1 : 0); i < want; i++) {
-      const ts = 280 + rng() * (COURSE.length - 620);
-      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
-      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
-      const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
-      const sc = 0.48 + rng() * 0.07; // a colossal fallen giant — ride the bore
-      this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
-      // the shell itself is the collider (player tube clamp) — just clear
-      // any earlier scatter out of the tube's footprint
-      const inTube = (px, ps) => {
-        const dsl = ps - ts;
-        const dxl = px - x;
-        const along = dsl * Math.cos(rot) + dxl * Math.sin(rot);
-        const lat = dxl * Math.cos(rot) - dsl * Math.sin(rot);
-        return Math.abs(along) < 50 * sc + 3 && Math.abs(lat) < 15 * sc + 2;
-      };
-      this.obstacles = this.obstacles.filter((o) => o.kind === 'log' || !inTube(o.x, -o.z));
-      for (const list of [treeXf, rockXf]) {
-        for (let j = list.length - 1; j >= 0; j--) {
-          if (inTube(list[j].x, -list[j].z)) list.splice(j, 1);
-        }
-      }
-    }
+    // (the hollow giants are sited below, once the surface is final)
 
     // 6) grind rails: a horizontal log poking out of a snow mound right at a
     // cliff lip — brake sideways onto it, carry momentum along the rail, and
@@ -338,23 +316,47 @@ export class Terrain {
       this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
-    // The ice bridge's namesake: a long trunk laid across the top of each
-    // notch with its ends bedded into the banks. Riders thread the passage
-    // well underneath; only a pop off the wall right at the ridge line can
-    // find it. (Placed here, once the surface is final, like the trunks.)
-    for (const b of this.bridges) {
-      const halfSpan = b.gapW / 2 + 3.2;
-      const scX = (2 * halfSpan) / 100;
-      const scT = 0.058; // ~1.2 m through — a trunk, not the notch's width
-      const reach = halfSpan * 0.85;
-      const ends = [-1, 1].map((sg) => this.heightAt(b.gapX + sg * reach, -b.s));
-      const D = 20.6 * scT;
-      const y = (ends[0] + ends[1]) / 2 - 0.4 * D; // lower half sunk into the banks
-      const tilt = Math.atan2(ends[1] - ends[0], 2 * reach);
-      this.logs.push({ x: b.gapX, z: -b.s, rot: 0, sc: scT, kind: 'log_small', span: { scX, tilt, y } });
-      const cy = y + 10.3 * scT; // trunk centreline
-      for (let px = -halfSpan + 1; px <= halfSpan - 1; px += 1.6) {
-        this.obstacles.push({ x: b.gapX + px, z: -b.s, r: 10.3 * scT, y: cy + Math.tan(tilt) * px, kind: 'log' });
+    // 7) massive hollow logs laid down the fall line — ride straight through
+    // the bore. Sited off the finished surface: the trunk is seated on a
+    // straight line between its two ends, so a site is only kept when the
+    // ground along the bore stays close to that line — no dip to fall
+    // through, no bump up into the ceiling
+    for (let i = 0, want = 1 + (rng() < 0.55 ? 1 : 0), tries = 0; i < want && tries < 40; tries++) {
+      const ts = 280 + rng() * (COURSE.length - 620);
+      const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
+      if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
+      const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
+      const sc = 0.48 + rng() * 0.07; // a colossal fallen giant — ride the bore
+      const ax = Math.sin(rot);
+      const az = Math.cos(rot);
+      const halfL = 50 * sc;
+      const at = (along) => this.heightAt(x + ax * along, -ts + az * along); // +along uphill
+      const hUp = at(halfL);
+      const hDown = at(-halfL);
+      let ok = true;
+      for (let k = -4; k <= 4 && ok; k++) {
+        const along = (k / 5) * halfL;
+        const chord = (hUp + hDown) / 2 + ((hUp - hDown) / 2) * (along / halfL);
+        const dev = at(along) - chord;
+        if (dev < -2.4 || dev > 1.6) ok = false;
+      }
+      if (!ok) continue;
+      i++;
+      this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
+      // the shell itself is the collider (player tube clamp) — just clear
+      // any earlier scatter out of the tube's footprint
+      const inTube = (px, ps) => {
+        const dsl = ps - ts;
+        const dxl = px - x;
+        const along = dxl * ax - dsl * az;
+        const lat = dxl * az + dsl * ax;
+        return Math.abs(along) < halfL + 3 && Math.abs(lat) < 16 * sc + 2;
+      };
+      this.obstacles = this.obstacles.filter((o) => o.kind === 'log' || !inTube(o.x, -o.z));
+      for (const list of [treeXf, rockXf]) {
+        for (let j = list.length - 1; j >= 0; j--) {
+          if (inTube(list[j].x, -list[j].z)) list.splice(j, 1);
+        }
       }
     }
 
@@ -536,6 +538,26 @@ export class Terrain {
       const dx = (x - cv.x) / cv.w;
       if (Math.abs(ds) < 3 && Math.abs(dx) < 1) {
         h -= cv.d * Math.exp(-ds * ds) * (1 - dx * dx);
+      }
+    }
+
+    // hollow trunks: snow always runs the length of the bore — any dip left
+    // under the tube is filled back up to the line the trunk was seated on
+    // (the shell hides the seam; past the mouths it fades out as a low bank)
+    if (this.hollowTubes) {
+      for (const tb of this.hollowTubes) {
+        const ds = s - tb.s0;
+        const dx = x - tb.x;
+        const along = dx * tb.ax - ds * tb.az;
+        const aa = Math.abs(along);
+        if (aa > tb.halfL + 5) continue;
+        const lat = Math.abs(dx * tb.az + ds * tb.ax);
+        const { rOut } = tubeRadii(tb, along);
+        if (lat > rOut + 1) continue;
+        const floor = tb.axY0 - TUBE.lift + clamp(along, -tb.halfL, tb.halfL) * tb.axSlope;
+        if (floor <= h) continue;
+        const w = (1 - smoothstep(tb.halfL, tb.halfL + 5, aa)) * (1 - smoothstep(rOut - 1.5, rOut + 1, lat));
+        h += (floor - h) * w;
       }
     }
 
@@ -884,12 +906,6 @@ export class Terrain {
         inst.rotation.set(-log.pitch, log.rot, 0);
         inst.position.set(log.x, log.posY, log.z);
         inst.name = 'hollow_log'; // the collider probe measures this shell
-      } else if (log.span) {
-        // bridge trunk: stretched along its grain to reach bank to bank,
-        // tilted to whichever bank sits higher, resting in both
-        inst.scale.set(log.span.scX, log.sc, log.sc);
-        inst.rotation.z = log.span.tilt;
-        inst.position.set(log.x, log.span.y, log.z);
       } else {
         inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
         const n = this.normalAt(log.x, log.z);

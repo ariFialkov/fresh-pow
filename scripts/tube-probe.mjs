@@ -6,14 +6,14 @@ import { chromium } from 'playwright';
 // dev server, not preview: the probe imports the game's own modules so it can
 // check the collider's numbers against the mesh it is supposed to match
 import { createServer } from 'vite';
-const server = await createServer({ server: { port: 4257, strictPort: true } });
+const server = await createServer({ server: { port: 4277, strictPort: true } });
 await server.listen();
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 page.on('pageerror', (e) => console.error('pageerror:', e));
 
 for (let i = 0; i < 14; i++) {
-  await page.goto('http://localhost:4257/');
+  await page.goto('http://localhost:4277/');
   await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
   await page.evaluate(() => document.querySelector('#start-btn').click());
   await page.waitForFunction(() => window.__fp?.race?.stateName === 'racing', undefined, { timeout: 120000 });
@@ -120,7 +120,19 @@ const out = await page.evaluate(async () => {
     const h = rc.intersectObjects(meshes, true)[0];
     flanks.push({ along: +along.toFixed(1), heldAtLat: held, meshOuterAtLat: h ? +(40 - h.distance).toFixed(2) : null });
   }
-  return { tube: { sc: +tb.sc.toFixed(2), halfL: +tb.halfL.toFixed(1) }, stations, rides, flanks };
+  // 4) the bore floor: snow along the axis must never drop below the line
+  // the trunk was seated on (min dev >= 0), and never bulge far above it
+  const floorDev = [];
+  for (let a = -tb.halfL; a <= tb.halfL; a += tb.halfL / 8) {
+    const c = at(a, 0);
+    const line = tb.axY0 - 1.0 + a * tb.axSlope;
+    floorDev.push(+(t.heightAt(c.x, -c.s) - line).toFixed(2));
+  }
+  return {
+    tube: { sc: +tb.sc.toFixed(2), halfL: +tb.halfL.toFixed(1) },
+    stations, rides, flanks,
+    floor: { minDev: Math.min(...floorDev), maxDev: Math.max(...floorDev), devs: floorDev },
+  };
 });
 console.log(JSON.stringify(out, null, 1));
 await browser.close(); await server.close(); process.exit(0);
