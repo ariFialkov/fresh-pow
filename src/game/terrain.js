@@ -276,18 +276,8 @@ export class Terrain {
       const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
       const sc = 0.48 + rng() * 0.07; // a colossal fallen giant — ride the bore
       this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
-      // walls flank the bore; pucks down each side, the middle clear
-      for (const side of [-1, 1]) {
-        for (const a of [-40, -24, -8, 8, 24, 40]) {
-          this.obstacles.push({
-            x: x + Math.sin(rot) * a * sc + Math.cos(rot) * side * 21 * sc,
-            z: -ts - Math.cos(rot) * a * sc - Math.sin(rot) * side * 21 * sc,
-            r: 2 * sc + 0.2,
-            kind: 'log',
-          });
-        }
-      }
-      // clear any earlier scatter out of the tube's footprint
+      // the shell itself is the collider (player tube clamp) — just clear
+      // any earlier scatter out of the tube's footprint
       const inTube = (px, ps) => {
         const dsl = ps - ts;
         const dxl = px - x;
@@ -444,27 +434,6 @@ export class Terrain {
       }
     }
 
-    // inside a hollow trunk the snow lies in a smooth cylindrical gutter —
-    // carry speed up the curved walls and swoop back down the other side;
-    // ride out the end up on a wall and the ground simply falls away
-    for (const log of this.logs) {
-      if (log.kind !== 'log_hollow') continue;
-      const s0l = -log.z;
-      const axl = Math.sin(log.rot);
-      const azl = Math.cos(log.rot);
-      const dsl = s - s0l;
-      const dxl = x - log.x;
-      const along = dsl * azl + dxl * axl;
-      const halfL = 50 * log.sc;
-      if (Math.abs(along) > halfL) continue;
-      const lat = dxl * azl - dsl * axl;
-      const R = 15 * log.sc;
-      if (Math.abs(lat) > R) continue;
-      const Rc = 16.5 * log.sc;
-      const env = smoothstep(0.5, 4.5, halfL - Math.abs(along));
-      h += env * (Rc - Math.sqrt(Math.max(0, Rc * Rc - lat * lat)));
-    }
-
     // entry mounds for the grind rails: a little natural ramp of drifted
     // snow the log's uphill end sticks out of
     for (const g of this.grindLogs) {
@@ -526,8 +495,13 @@ export class Terrain {
       if (along < 0 || along > g.len || Math.abs(lat) > 0.8) continue;
       return {
         along,
+        lat,
         len: g.len,
         topY: g.topY,
+        gx: g.x,
+        gs0: g.s0,
+        ax: g.ax,
+        az: g.az,
         px: g.x + g.ax * along,
         pz: -(g.s0 + g.az * along),
         yaw: Math.atan2(g.ax, g.az),

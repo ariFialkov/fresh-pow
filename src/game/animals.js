@@ -186,7 +186,9 @@ export class Animals {
       // hooves press dashed bounding tracks during the contact phase, each
       // dash tapering in and out with the stride so it reads as a real print
       const contact = !a.air && stride < 0.45;
-      const pressW = contact ? Math.max(0.04, a.tracks[0].w * (0.25 + 0.85 * (1 - stride / 0.45))) : undefined;
+      // elliptical width profile so each dash reads as an oval print
+      const ph = Math.min(1, stride / 0.45);
+      const pressW = contact ? Math.max(0.04, a.tracks[0].w * Math.sqrt(1 - ph * ph)) : undefined;
       for (const tk of a.tracks) {
         tk.trail.push(a.x - dz * tk.off - dx * half * 0.7, z + dx * tk.off - dz * half * 0.7, contact, pressW);
       }

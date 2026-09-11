@@ -318,6 +318,17 @@ export class Player {
       // gutter can't carry you through the wood
       ({ nx, nz } = this._tubeClamp(nx, nz, dir));
       const ny = this.pos.y + this.vy * dt;
+      // grind rails are solid in the air as well: smack the trunk mid-flight
+      // and you glance off sideways (clearing over or under it is fine)
+      if (!(this._grindT > 0)) {
+        const railHit = t.grindAt(nx, -nz);
+        if (railHit && ny < railHit.topY + 0.15 && ny > railHit.topY - 1.05) {
+          const latOut = Math.sign(railHit.lat || 1) * 1.15;
+          nx = railHit.gx + railHit.ax * railHit.along + railHit.az * latOut;
+          nz = -(railHit.gs0 + railHit.az * railHit.along - railHit.ax * latOut);
+          this.speed *= 0.4;
+        }
+      }
       const ground = t.heightAt(nx, nz);
 
       // animate tricks toward their targets
@@ -462,8 +473,20 @@ export class Player {
       const dxN = nx - tb.x;
       const alongN = dsN * tb.az + dxN * tb.ax;
       if (Math.abs(alongN) > tb.halfL) continue;
-      const latO = (this.pos.x - tb.x) * tb.az - (-this.pos.z - tb.s0) * tb.ax;
+      const dsO = -this.pos.z - tb.s0;
+      const dxO = this.pos.x - tb.x;
+      const alongO = dsO * tb.az + dxO * tb.ax;
+      const latO = dxO * tb.az - dsO * tb.ax;
       const latN = dxN * tb.az - dsN * tb.ax;
+      // running into the cut face of the shell rim stops you cold
+      if (Math.abs(latN) > tb.R && Math.abs(latN) < tb.outR && Math.abs(alongO) > tb.halfL && Math.abs(alongN) <= tb.halfL) {
+        const alongClamp = Math.sign(alongO) * (tb.halfL + 0.3);
+        nx = tb.x + tb.ax * alongClamp + tb.az * latN;
+        nz = -(tb.s0 + tb.az * alongClamp - tb.ax * latN);
+        this.speed *= 0.25;
+        if (!this.airborne && this.stumbleT <= 0) this.stumble('slammed a log');
+        continue;
+      }
       let clampLat = null;
       if (Math.abs(latO) < tb.R && Math.abs(latN) >= tb.R - 0.05) {
         clampLat = Math.sign(latN || 1) * (tb.R - 0.2);
