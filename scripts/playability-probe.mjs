@@ -67,7 +67,7 @@ const notch = await page.evaluate(async () => {
   P.stumbleT = 0;
   const yaw = 0.5; // drift right across the notch toward the wall
   P.yaw = P.travelYaw = yaw;
-  const rec = { launched: false, maxQ: 0, landQ: null, maxRise: 0, stumbles: 0 };
+  const rec = { launched: false, maxQ: 0, landQ: null, maxRise: 0, stumbles: 0, trace: [] };
   const orig = r.update.bind(r);
   let wasAir = false;
   r.update = (dt) => {
@@ -75,6 +75,11 @@ const notch = await page.evaluate(async () => {
     orig(dt);
     if (P.stumbleT > pre + 0.1) rec.stumbles++;
     const q = (P.pos.x - b.gapX) / (b.gapW / 2);
+    // frame trace around the wall: what the launch trigger actually saw
+    const pp = t.pipeAt(P.pos.x, P.progress);
+    if (rec.trace.length < 60 && Math.abs(q) > 0.3) {
+      rec.trace.push([+dt.toFixed(3), +q.toFixed(2), pp ? +pp.env.toFixed(2) : null, +P.groundVy.toFixed(1), P.airborne ? 1 : 0, +P.speed.toFixed(1), +(P.progress - b.s).toFixed(1)]);
+    }
     if (!P.airborne) P.yaw = yaw;
     if (P.airborne && !wasAir) rec.launched = true;
     if (P.airborne) rec.maxRise = Math.max(rec.maxRise, P.pos.y - t.heightAt(P.pos.x, P.pos.z));
