@@ -569,7 +569,7 @@ export class Terrain {
       const ds = (s - b.s) / b.len;
       if (Math.abs(ds) >= 1) continue;
       const env = 0.5 + 0.5 * Math.cos(ds * Math.PI);
-      if (env < 0.55) continue;
+      if (env < 0.3) continue; // the launch's own climb-rate gate rejects the low tails
       return { q: (x - b.gapX) / (b.gapW / 2), env, p: b, lipQ: 0.8 };
     }
     return null;

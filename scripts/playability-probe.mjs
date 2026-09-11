@@ -57,14 +57,15 @@ const notch = await page.evaluate(async () => {
   const b = t.bridges[0];
   if (!b) return null;
   const P = r.player;
-  // start 30 m above the ridge line, in the notch, angled toward the wall
-  const s0 = b.s - 30;
-  const x0 = b.gapX - 2;
+  // start in the notch a little above the ridge line, angled so the wall
+  // is met right where it is tallest
+  const s0 = b.s - 16;
+  const x0 = b.gapX - 3;
   P.pos.set(x0, t.groundAt(x0, -s0), -s0);
   P.speed = 17;
   P.airborne = false;
   P.stumbleT = 0;
-  const yaw = 0.42; // drift right across the notch toward the wall
+  const yaw = 0.5; // drift right across the notch toward the wall
   P.yaw = P.travelYaw = yaw;
   const rec = { launched: false, maxQ: 0, landQ: null, maxRise: 0, stumbles: 0 };
   const orig = r.update.bind(r);
