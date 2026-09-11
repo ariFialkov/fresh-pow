@@ -42,7 +42,7 @@ const SPECIES = {
   chile: { label: 'a guanaco', herd: [3, 6], speed: 11, across: 5, r: 0.95, gallop: 7, bob: 0.3 },
   nz: { label: 'a sheep', herd: [5, 8], speed: 7.5, across: 3.5, r: 0.8, gallop: 6, bob: 0.22 },
   swiss: { label: 'an ibex', herd: [1, 2], speed: 9, across: 4.5, r: 0.9, gallop: 6.8, bob: 0.28 },
-  japan: { label: 'a fox', herd: [1, 2], speed: 11, across: 5.5, r: 0.55, gallop: 8.5, bob: 0.2 },
+  japan: { label: 'a fox', herd: [2, 3], speed: 11, across: 5, r: 0.55, gallop: 8.5, bob: 0.2, evGap: 0.55 },
 };
 
 export class Animals {
@@ -65,7 +65,7 @@ export class Animals {
         seed: (seed ^ Math.floor(s)) >>> 0,
         fired: false,
       });
-      s += 430 + rng() * 380;
+      s += (430 + rng() * 380) * (this.spec.evGap ?? 1);
     }
   }
 
@@ -113,7 +113,7 @@ export class Animals {
   update(dt, playerS, player) {
     if (!this.src) return;
     for (const ev of this.events) {
-      if (!ev.fired && playerS > ev.s - 160) {
+      if (!ev.fired && playerS > ev.s - 95) {
         ev.fired = true;
         this._spawn(ev);
       }
@@ -150,16 +150,16 @@ export class Animals {
       }
       // hitting one hurts
       if (player && !player.finished && player.knockT <= 0 && player.stumbleT <= 0 && !player.airborne) {
-        const dx = player.pos.x - a.x;
-        const dz = player.pos.z - z;
+        const px = player.pos.x - a.x;
+        const pz = player.pos.z - z;
         const rr = this.spec.r + 0.8;
-        if (dx * dx + dz * dz < rr * rr) player.knockDown(this.spec.label);
+        if (px * px + pz * pz < rr * rr) player.knockDown(this.spec.label);
       }
       // gone: far behind the player, past the finish, or off into the trees
       if (
         a.s < playerS - 80 ||
         a.s > COURSE.length - 40 ||
-        Math.abs(a.x - this.terrain.centerAt(a.s)) > COURSE.halfWidth * 1.35
+        Math.abs(a.x - this.terrain.centerAt(a.s)) > COURSE.halfWidth * 1.5
       ) {
         a.dead = true;
         this.scene.remove(a.obj);
