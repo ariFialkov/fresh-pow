@@ -50,7 +50,7 @@ export class Bot {
 
   placeAt(x, z) {
     this.d = -z;
-    this.y = this.terrain.heightAt(x, z);
+    this.y = this.terrain.groundAt(x, z);
     this.obj.position.set(x, this.y, z);
   }
 
@@ -187,7 +187,7 @@ export class Bot {
     // gradually — no sideways bunching into the neighbors' gates
     x = lerp(this.lane.x, x, smoothstep(6, 85, this.d));
     const z = -this.d;
-    const ground = this.terrain.heightAt(x, z);
+    const ground = this.terrain.groundAt(x, z);
     if (ground <= this.y) {
       // falling / flying off drops
       this.vFall += 16 * dt;

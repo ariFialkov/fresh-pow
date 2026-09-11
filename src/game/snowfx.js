@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // instead of one perfect circle, so overlapping particles read as a fine
 // granular cloud rather than round cotton puffs
 let spriteTex = null;
-function getSprite() {
+export function getSprite() {
   if (spriteTex) return spriteTex;
   const c = document.createElement('canvas');
   c.width = c.height = 96;

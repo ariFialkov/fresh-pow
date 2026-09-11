@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
 import { createProp } from './props.js';
+import { RAMP_APRON } from './startgate.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -98,6 +99,7 @@ export class Terrain {
           gapX: this.centerAt(bs) + (rng() - 0.5) * 42,
           gapW: 12 + rng() * 4,
           len: 21,
+          lipH: 2.2, // snow banks piled up along both edges of the notch
         });
         bs += 420 + rng() * 260;
       } else {
@@ -336,6 +338,26 @@ export class Terrain {
       this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
+    // The ice bridge's namesake: a long trunk laid across the top of each
+    // notch with its ends bedded into the banks. Riders thread the passage
+    // well underneath; only a pop off the wall right at the ridge line can
+    // find it. (Placed here, once the surface is final, like the trunks.)
+    for (const b of this.bridges) {
+      const halfSpan = b.gapW / 2 + 3.2;
+      const scX = (2 * halfSpan) / 100;
+      const scT = 0.058; // ~1.2 m through — a trunk, not the notch's width
+      const reach = halfSpan * 0.85;
+      const ends = [-1, 1].map((sg) => this.heightAt(b.gapX + sg * reach, -b.s));
+      const D = 20.6 * scT;
+      const y = (ends[0] + ends[1]) / 2 - 0.4 * D; // lower half sunk into the banks
+      const tilt = Math.atan2(ends[1] - ends[0], 2 * reach);
+      this.logs.push({ x: b.gapX, z: -b.s, rot: 0, sc: scT, kind: 'log_small', span: { scX, tilt, y } });
+      const cy = y + 10.3 * scT; // trunk centreline
+      for (let px = -halfSpan + 1; px <= halfSpan - 1; px += 1.6) {
+        this.obstacles.push({ x: b.gapX + px, z: -b.s, r: 10.3 * scT, y: cy + Math.tan(tilt) * px, kind: 'log' });
+      }
+    }
+
     // Seat the hollow trunks now that the surface is final: pitch each one
     // with the run and sink it until the bore axis sits just above the snow,
     // so the mouth opens at its widest right at the surface. Solving it once
@@ -362,6 +384,16 @@ export class Terrain {
           axSlope: (hUp - hDown) / (2 * halfL), // +along is the uphill mouth
         };
       });
+
+    // the start-house ramps meet the snow on the rider line (s 4, the lane
+    // centre) and their lips sit a fixed drop lower just downhill — bank the
+    // snow up to them (see heightAt). Solved last, off the finished surface.
+    const gateCx = this.centerAt(4);
+    this.apron = {
+      cx: gateCx,
+      lipS: 4 + RAMP_APRON.lipDz,
+      lipY: this.heightAt(gateCx, -4) - RAMP_APRON.lipDrop,
+    };
 
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
     this._treeXf = treeXf;
@@ -433,8 +465,12 @@ export class Terrain {
       if (Math.abs(ds) < 1) {
         const env = 0.5 + 0.5 * Math.cos(ds * Math.PI);
         const gx = (x - b.gapX) / (b.gapW / 2);
-        const gap = Math.abs(gx) < 1 ? Math.cos((gx * Math.PI) / 2) ** 2 : 0;
-        h += b.h * env * (1 - gap);
+        const ag = Math.abs(gx);
+        const gap = ag < 1 ? Math.cos((gx * Math.PI) / 2) ** 2 : 0;
+        // banks along both lips of the notch: a rim to pop off riding up the
+        // wall, and the abutments the bridge log rests in
+        const lip = ag > 0.92 ? b.lipH * smoothstep(0.92, 1.12, ag) * (ag > 1.12 ? Math.exp(-(((ag - 1.12) / 1.3) ** 2)) : 1) : 0;
+        h += (b.h * (1 - gap) + lip) * env;
       }
     }
 
@@ -503,6 +539,16 @@ export class Terrain {
       }
     }
 
+    // start-house apron: snow banked up to the ramp lips so riders roll
+    // off the ramps onto the slope instead of dropping off them
+    if (this.apron) {
+      const a = this.apron;
+      const ds = s - a.lipS;
+      if (ds > 0 && ds < RAMP_APRON.blend && Math.abs(x - a.cx) < RAMP_APRON.halfW) {
+        h = Math.max(h, lerp(a.lipY, h, smoothstep(0, 1, ds / RAMP_APRON.blend)));
+      }
+    }
+
     return h;
   }
 
@@ -515,9 +561,27 @@ export class Terrain {
       if (s < p.s0 - 35 || s > p.s1 + 35) continue;
       const env = smoothstep(p.s0 - 35, p.s0 + 14, s) * (1 - smoothstep(p.s1 - 14, p.s1 + 35, s));
       if (env < 0.55) continue;
-      return { q: (x - (this.centerAt(s) + p.off)) / p.w, env, p };
+      return { q: (x - (this.centerAt(s) + p.off)) / p.w, env, p, lipQ: 0.97 };
+    }
+    // the ice-bridge notch rides like a short pipe: its bowl walls are
+    // steepest partway up, so the pop comes earlier than off a true lip
+    for (const b of this.bridges) {
+      const ds = (s - b.s) / b.len;
+      if (Math.abs(ds) >= 1) continue;
+      const env = 0.5 + 0.5 * Math.cos(ds * Math.PI);
+      if (env < 0.55) continue;
+      return { q: (x - b.gapX) / (b.gapW / 2), env, p: b, lipQ: 0.8 };
     }
     return null;
+  }
+
+  /**
+   * Height the riders actually stand on: the snow, or a built surface laid
+   * over it (the start-house ramps) where one is registered.
+   */
+  groundAt(x, z) {
+    const h = this.heightAt(x, z);
+    return this.surface ? Math.max(h, this.surface(x, z)) : h;
   }
 
   /**
@@ -820,6 +884,12 @@ export class Terrain {
         inst.rotation.set(-log.pitch, log.rot, 0);
         inst.position.set(log.x, log.posY, log.z);
         inst.name = 'hollow_log'; // the collider probe measures this shell
+      } else if (log.span) {
+        // bridge trunk: stretched along its grain to reach bank to bank,
+        // tilted to whichever bank sits higher, resting in both
+        inst.scale.set(log.span.scX, log.sc, log.sc);
+        inst.rotation.z = log.span.tilt;
+        inst.position.set(log.x, log.span.y, log.z);
       } else {
         inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
         const n = this.normalAt(log.x, log.z);

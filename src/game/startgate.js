@@ -14,6 +14,16 @@ const PAV_SY = 0.15;
 const PAV_SZ = 0.185;
 const PAV_FRONT = 28.7; // front edge z in model units
 const rampY = (zn) => 7.4 - 6 * (THREE.MathUtils.clamp(zn, 8, 28) - 8) / 20;
+// the ramp meets the snow at the rider line and its lip sits 1.45 m downhill,
+// this much lower — the terrain banks its snow up to that lip so riders roll
+// off the ramp instead of dropping off it
+const LIP_DZ = 1.45;
+export const RAMP_APRON = {
+  lipDz: LIP_DZ,
+  lipDrop: (rampY(PAV_FRONT - LIP_DZ / PAV_SZ) - 1.4) * PAV_SY,
+  halfW: 50 * PAV_SX,
+  blend: 2.4, // metres past the lip over which the bank eases into the slope
+};
 
 // gate booth model facts: the rider lane opens between the hub posts at
 // x -17.9..11.7 (center -3.1), the stopper bar pivots on the right hub at
@@ -54,7 +64,7 @@ export class StartGate {
     // foundation — the uphill corners sink into the snow) and positioned so
     // each bay's ramp surface meets the snow right at the rider line ----
     const pavW = 100 * PAV_SX;
-    const frontZ = z - 1.45; // ramp lip just downhill of the riders
+    const frontZ = z - LIP_DZ; // ramp lip just downhill of the riders
     const pz = frontZ + PAV_FRONT * PAV_SZ;
     const pavY = terrain.heightAt(cx, z) - rampY((pz - z) / PAV_SZ) * PAV_SY;
     const pav = createProp('pavilion', theme);
@@ -66,6 +76,16 @@ export class StartGate {
     // hide the pavilion until the camera has moved out past the ramp lips
     this.pav = pav;
     this.hideZ = frontZ - 1.5;
+    // the bay ramps are a real surface: riders slide down them to the lip
+    // instead of sinking through to the snow underneath. Registered on the
+    // terrain so player and bots alike stand on max(snow, ramp).
+    const halfW = pavW / 2;
+    terrain.surface = (x, wz) => {
+      if (Math.abs(x - cx) > halfW) return -Infinity;
+      const zn = (pz - wz) / PAV_SZ; // model z, +z runs downhill after the flip
+      if (zn < 8 || zn > PAV_FRONT) return -Infinity;
+      return pavY + rampY(zn) * PAV_SY;
+    };
 
     // ---- LED screens filling the pavilion's blank display shells. The big
     // center shell (model x -19.5..20.1, y -2..8.4 sloping z 16.8..22.6,

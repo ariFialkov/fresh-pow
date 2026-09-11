@@ -54,11 +54,14 @@ export class Player {
     this.combo = [];
     this.style = 0;
 
-    input.onSwipe = (dir) => this._trick(dir);
+    // keep a handle on our swipe hook: the input is shared across scenes and
+    // a dying race must only unhook itself, never the race replacing it
+    this._onSwipe = (dir) => this._trick(dir);
+    input.onSwipe = this._onSwipe;
   }
 
   placeAt(x, z) {
-    this.pos.set(x, this.terrain.heightAt(x, z), z);
+    this.pos.set(x, this.terrain.groundAt(x, z), z);
     this._sync(0);
   }
 
@@ -97,7 +100,7 @@ export class Player {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const nx = this.pos.x + dir.x * this.speed * dt;
       const nz = this.pos.z + dir.z * this.speed * dt;
-      this.pos.set(nx, this.terrain.heightAt(nx, nz), nz);
+      this.pos.set(nx, this.terrain.groundAt(nx, nz), nz);
       this.airborne = false;
       this._sync(dt);
       setPose(this.rider, {
@@ -168,8 +171,8 @@ export class Player {
     if (!this.airborne) {
       // ---- slope acceleration along the direction of travel ----
       const e = 1.6;
-      const hHere = t.heightAt(this.pos.x, this.pos.z);
-      const hAhead = t.heightAt(this.pos.x + dir.x * e, this.pos.z + dir.z * e);
+      const hHere = t.groundAt(this.pos.x, this.pos.z);
+      const hAhead = t.groundAt(this.pos.x + dir.x * e, this.pos.z + dir.z * e);
       const slope = (hHere - hAhead) / e; // >0 when heading downhill
       let a = G * slope;
 
@@ -260,7 +263,7 @@ export class Player {
       // giant hollow trunks are solid — the bore wall contains you
       ({ nx, nz } = this._tubeClamp(nx, nz, dir));
 
-      const ground = t.heightAt(nx, nz);
+      const ground = t.groundAt(nx, nz);
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
       this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
 
@@ -269,7 +272,7 @@ export class Player {
       // arc drops you back down flush with the wall you left
       const pp = t.pipeAt(nx, -nz);
       let lipLaunch = false;
-      if (pp && Math.abs(pp.q) >= 0.97 && this._prevPipeQ != null && Math.abs(this._prevPipeQ) < 0.97
+      if (pp && Math.abs(pp.q) >= pp.lipQ && this._prevPipeQ != null && Math.abs(this._prevPipeQ) < pp.lipQ
           && this.groundVy > 3 && this.speed > 7) {
         lipLaunch = true;
         this.airborne = true;
@@ -278,11 +281,12 @@ export class Player {
           this.vy += 4.2;
           if (this.hud) this.hud.trickToast('POP!', 'off the lip');
         }
-        // bleed the outward lateral speed; keep the downhill run
+        // turn the outward run back toward the middle so the arc comes down
+        // inside the pipe, never out over the deck; keep the downhill run
         const out = Math.sign(pp.q);
         let vx = dir.x * this.speed;
         const vz = dir.z * this.speed;
-        if (vx * out > 0) vx *= 0.15;
+        if (vx * out > 0) vx = -vx * 0.35;
         this.speed = Math.hypot(vx, vz);
         this.travelYaw = Math.atan2(vx, -vz);
         this.pos.set(nx, this.pos.y + this.vy * dt, nz);
@@ -330,7 +334,23 @@ export class Player {
           this.speed *= 0.4;
         }
       }
-      const ground = t.heightAt(nx, nz);
+      // raised timber mid-flight: pop up into the bridge trunk and it knocks
+      // you straight back down
+      if (this.stumbleT <= 0) {
+        for (const o of t.obstaclesNear(-nz - 3, -nz + 3)) {
+          if (o.y == null || ny > o.y + o.r || ny + 1.7 < o.y - o.r) continue;
+          const dx = nx - o.x;
+          const dz = nz - o.z;
+          const r = o.r + 0.6;
+          if (dx * dx + dz * dz < r * r) {
+            this.vy = Math.min(this.vy, -1.5);
+            this.speed *= 0.4;
+            this.stumble('slammed a log');
+            break;
+          }
+        }
+      }
+      const ground = t.groundAt(nx, nz);
 
       // animate tricks toward their targets
       const spinRate = 6.2, flipRate = 5.4;
@@ -540,6 +560,8 @@ export class Player {
     if (this.stumbleT > 0) return;
     const s = this.progress;
     for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
+      // raised timber (the bridge trunk) only counts when the body reaches it
+      if (o.y != null && (this.pos.y > o.y + o.r || this.pos.y + 1.7 < o.y - o.r)) continue;
       const dx = this.pos.x - o.x;
       const dz = this.pos.z - o.z;
       const r = o.r + 0.7;
@@ -584,7 +606,7 @@ export class Player {
     }
 
     // blob shadow hugs the snow
-    const gy = t.heightAt(this.pos.x, this.pos.z);
+    const gy = t.groundAt(this.pos.x, this.pos.z);
     this.rider.shadow.position.y = gy - this.pos.y + 0.06;
     const h = clamp(this.pos.y - gy, 0, 10);
     this.rider.shadow.scale.setScalar(clamp(1 - h * 0.07, 0.3, 1));

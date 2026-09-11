@@ -37,6 +37,14 @@ export class Input {
     window.addEventListener('pointermove', this._onPointerMove);
     window.addEventListener('pointerup', this._onPointerUp);
     window.addEventListener('pointercancel', this._onPointerUp);
+    // a key held while the window loses focus never sends its keyup — drop
+    // the held set so it can't stay stuck (and block that key's next press
+    // from counting as a fresh trick swipe)
+    this._onBlur = () => {
+      this._keys.clear();
+      this._applyKeys();
+    };
+    window.addEventListener('blur', this._onBlur);
   }
 
   dispose() {

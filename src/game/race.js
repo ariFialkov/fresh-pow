@@ -376,6 +376,9 @@ export class RaceScene {
 
   destroy() {
     this.hud.destroy();
-    this.input.onSwipe = null;
+    // the next race is built before this one is torn down and has already
+    // claimed the swipe hook — only clear it if it is still ours, or every
+    // re-race would start with tricks disconnected
+    if (this.input.onSwipe === this.player._onSwipe) this.input.onSwipe = null;
   }
 }

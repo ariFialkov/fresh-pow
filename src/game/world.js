@@ -1,5 +1,6 @@
 // Shared scene dressing: sky dome, lighting, fog, drifting snow.
 import * as THREE from 'three';
+import { getSprite } from './snowfx.js';
 import { THEMES } from './themes.js';
 
 export function makeSky(theme = THEMES.utah) {
@@ -76,11 +77,15 @@ export class Snowfall {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    // the same soft powder sprite the spray uses, so flakes read as round
+    // puffs instead of hard squares when they drift past the lens
     const mat = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.22,
+      map: getSprite(),
+      size: 0.3,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
+      alphaTest: 0.02,
       sizeAttenuation: true,
       depthWrite: false,
     });
