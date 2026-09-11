@@ -7,7 +7,6 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
 import { createProp } from './props.js';
-import { speciesTree } from './trees.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -139,7 +138,7 @@ export class Terrain {
     const addTree = (x, sPos, collides) => {
       const sc = 0.8 + rng() * 0.9;
       const z = -sPos;
-      treeXf.push({ x, z, sc, rot: rng() * Math.PI * 2, co: collides });
+      treeXf.push({ x, z, sc, rot: rng() * Math.PI * 2 });
       if (collides) this.obstacles.push({ x, z, r: 1.1 * sc, kind: 'tree' });
     };
     const addRock = (x, sPos, collides) => {
@@ -601,34 +600,6 @@ export class Terrain {
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const sc = new THREE.Vector3();
-
-    // venue tree species: procedural geometry matched to the uploaded
-    // sculpt's silhouette, tinted and instanced like the default spruce
-    const species = speciesTree(this.theme);
-    if (species) {
-      const parts = [
-        [species.trunk, this.theme.trunk],
-        [species.foliage, this.theme.foliage],
-        [species.snow, 0xf4f8fd],
-      ];
-      for (const [geo, color] of parts) {
-        const inst = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color }), nTreesAll);
-        this._treeXf.forEach((t, i) => {
-          const y = this.heightAt(t.x, t.z) - 0.2;
-          q.setFromAxisAngle(up, t.rot);
-          // the species geometry is already full size — remap the spruce
-          // jitter (0.8-1.7) into a gentler grove variation
-          sc.setScalar(0.72 + (t.sc - 0.8) * 0.45);
-          m.compose(new THREE.Vector3(t.x, y, t.z), q, sc);
-          inst.setMatrixAt(i, m);
-        });
-        inst.castShadow = color !== 0xf4f8fd;
-        inst.computeBoundingSphere();
-        group.add(inst);
-      }
-      this._buildRocksAndFlags(group, m, q, up, sc);
-      return;
-    }
 
     // trees: trunk + two foliage cones merged per-instance via two instanced meshes
     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1.5, 7);
