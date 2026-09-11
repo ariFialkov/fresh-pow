@@ -76,12 +76,20 @@ export class Animals {
       const x = this.terrain.centerAt(s) + ev.side * COURSE.halfWidth * (0.72 + rng() * 0.16) + (rng() - 0.5) * 5;
       const obj = new THREE.Group();
       const body = this.src.clone();
+      // per-animal materials so each one can fade out on its own
+      const mats = [];
+      body.traverse((o) => {
+        if (o.isMesh) {
+          o.material = o.material.clone();
+          mats.push(o.material);
+        }
+      });
       obj.add(body);
       if (!Animals._shadowGeo) {
         Animals._shadowGeo = new THREE.CircleGeometry(1, 14);
-        Animals._shadowMat = new THREE.MeshBasicMaterial({ color: 0x0a1420, transparent: true, opacity: 0.26, depthWrite: false });
       }
-      const shadow = new THREE.Mesh(Animals._shadowGeo, Animals._shadowMat);
+      const shMat = new THREE.MeshBasicMaterial({ color: 0x0a1420, transparent: true, opacity: 0.26, depthWrite: false });
+      const shadow = new THREE.Mesh(Animals._shadowGeo, shMat);
       shadow.rotation.x = -Math.PI / 2;
       shadow.position.y = 0.07;
       shadow.scale.setScalar(this.spec.r * 1.5);
@@ -99,9 +107,17 @@ export class Animals {
       this.active.push({
         obj,
         body,
+        shadow,
+        shMat,
+        mats,
         tracks,
         x,
         s,
+        y: this.terrain.heightAt(x, -s) + 0.06,
+        vy: 0,
+        air: false,
+        fade: 1,
+        fading: false,
         vs: this.spec.speed * (0.85 + rng() * 0.3), // downhill run
         vx: -ev.side * this.spec.across * (0.75 + rng() * 0.5), // cutting across
         t: rng() * 6.3,
@@ -133,36 +149,76 @@ export class Animals {
       const hC = this.terrain.heightAt(a.x, z);
       const hN = this.terrain.heightAt(a.x + dx * half, z + dz * half);
       const hT = this.terrain.heightAt(a.x - dx * half, z - dz * half);
-      const y = Math.max(hC, (hN + hT) / 2) + 0.06;
+      const groundY = Math.max(hC, (hN + hT) / 2) + 0.06;
+      // ledges and cliff lips: hop off ballistically and land back in stride
+      // instead of snapping straight down to the lower ground
+      if (!a.air) {
+        if (groundY < a.y - 0.75) {
+          a.air = true;
+          a.vy = 2.0; // a small bound off the edge
+        } else {
+          a.y = groundY;
+        }
+      }
+      if (a.air) {
+        a.vy -= 13 * dt;
+        a.y += a.vy * dt;
+        if (a.y <= groundY) {
+          a.y = groundY;
+          a.air = false;
+          a.vy = 0;
+        }
+      }
       const stride = Math.abs(Math.sin(a.t * a.gallop));
-      a.obj.position.set(a.x, y, z);
-      this.terrain.normalAt(a.x, z, _n);
+      a.obj.position.set(a.x, a.y, z);
+      if (a.air) _n.set(0, 1, 0);
+      else this.terrain.normalAt(a.x, z, _n);
       a.obj.up.copy(_n);
       const dn = dx * _n.x + dz * _n.z; // travel projected onto the slope
       _d.set(dx - _n.x * dn, -_n.y * dn, dz - _n.z * dn);
-      a.obj.lookAt(a.x + _d.x, y + _d.y, z + _d.z); // model faces +z
-      a.body.position.y = stride * this.spec.bob; // shadow stays on the snow
-      a.body.rotation.x = Math.sin(a.t * a.gallop * 2) * 0.1; // gallop rock
+      a.obj.lookAt(a.x + _d.x, a.y + _d.y, z + _d.z); // model faces +z
+      a.body.position.y = a.air ? 0 : stride * this.spec.bob;
+      a.body.rotation.x = a.air ? 0.12 : Math.sin(a.t * a.gallop * 2) * 0.1; // gallop rock / mid-air pose
+      // the blob shadow stays on the snow below and shrinks with height
+      const drop = a.y - (hC + 0.06);
+      a.shadow.position.y = -drop + 0.07;
+      a.shadow.scale.setScalar(this.spec.r * 1.5 * Math.max(0.35, 1 - drop * 0.12));
       // hooves press dashed bounding tracks during the contact phase
-      const contact = stride < 0.45;
+      const contact = !a.air && stride < 0.45;
       for (const tk of a.tracks) {
         tk.trail.push(a.x - dz * tk.off - dx * half * 0.7, z + dx * tk.off - dz * half * 0.7, contact);
       }
       // hitting one hurts
-      if (player && !player.finished && player.knockT <= 0 && player.stumbleT <= 0 && !player.airborne) {
+      if (player && !a.fading && !player.finished && player.knockT <= 0 && player.stumbleT <= 0 && !player.airborne) {
         const px = player.pos.x - a.x;
         const pz = player.pos.z - z;
         const rr = this.spec.r + 0.8;
         if (px * px + pz * pz < rr * rr) player.knockDown(this.spec.label);
       }
-      // gone: far behind the player, past the finish, or off into the trees
+      // leaving: far behind the player, past the finish, or off into the
+      // trees — fade out mid-stride instead of vanishing
       if (
-        a.s < playerS - 80 ||
-        a.s > COURSE.length - 40 ||
-        Math.abs(a.x - this.terrain.centerAt(a.s)) > COURSE.halfWidth * 1.5
+        !a.fading &&
+        (a.s < playerS - 80 ||
+          a.s > COURSE.length - 40 ||
+          Math.abs(a.x - this.terrain.centerAt(a.s)) > COURSE.halfWidth * 1.5)
       ) {
-        a.dead = true;
-        this.scene.remove(a.obj);
+        a.fading = true;
+        for (const m of a.mats) {
+          m.transparent = true;
+          m.depthWrite = false;
+        }
+      }
+      if (a.fading) {
+        a.fade -= dt / 1.1;
+        for (const m of a.mats) m.opacity = Math.max(0, a.fade);
+        a.shMat.opacity = 0.26 * Math.max(0, a.fade);
+        if (a.fade <= 0) {
+          a.dead = true;
+          this.scene.remove(a.obj);
+          for (const m of a.mats) m.dispose();
+          a.shMat.dispose();
+        }
       }
     }
     this.active = this.active.filter((a) => !a.dead);

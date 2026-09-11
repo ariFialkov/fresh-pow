@@ -49,8 +49,9 @@ const logs = await page.evaluate(() => {
 });
 console.log('logs:', JSON.stringify(logs));
 for (const [kind, l] of Object.entries(logs)) {
+  const far = kind === 'log_hollow' ? { dx: 20, dy: 9, dz: 34, ty: 5 } : { dx: 13, dy: 2.6, dz: 4, ty: 1.2 };
   await page.evaluate((a) => { window.__pin = 300; window.__aim = a; },
-    { x: l.x + 13, y: l.y + 2.6, z: -(l.s - 4), tx: l.x, ty: l.y + 1.2, tz: -l.s });
+    { x: l.x + far.dx, y: l.y + far.dy, z: -(l.s - far.dz), tx: l.x, ty: l.y + far.ty, tz: -l.s });
   await page.waitForTimeout(600);
   await page.screenshot({ path: `scratch-${kind}.png` });
   console.log('shot', kind);
@@ -64,7 +65,7 @@ const ev = await page.evaluate(() => {
 });
 await page.evaluate((e) => {
   const r = window.__fp.race;
-  window.__pin = e.s - 150;
+  window.__pin = e.s - 90;
   window.__aim = null;
 }, ev);
 await page.waitForFunction(() => window.__fp.race.animals.active.length > 0, undefined, { timeout: 30000 });

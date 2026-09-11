@@ -202,6 +202,9 @@ export class Player {
       // speed into the snow it displaces (boards dig the deepest)
       if (!this.isSled) a -= Math.abs(this.edge) * this.speed * (this.isBoard ? 0.058 : 0.046);
 
+      // on a grind rail none of the snow physics bite — flat wood, light drag
+      if (this._grindT > 0) a = -2.4;
+
       this.speed = Math.max(0, this.speed + a * dt);
 
       // ---- move & follow / leave the ground ----
@@ -220,6 +223,36 @@ export class Player {
         }
       }
 
+      // ---- log grind: brake sideways onto a rail at the lip, carry the
+      // momentum along it, trick off the end over the drop ----
+      let grinding = false;
+      if (inp.brake && !stumbling && this.speed > 5) {
+        const gr = t.grindAt(nx, -nz);
+        if (gr && (this._grindT > 0 || this.pos.y > gr.topY - 1.4)) {
+          grinding = true;
+          this._grindT = (this._grindT || 0) + dt;
+          this.travelYaw = gr.yaw; // locked to the rail line
+          this.pos.set(gr.px, gr.topY, gr.pz);
+          this.vy = 0;
+          this.groundVy = 0;
+          this.style += 45 * dt;
+        }
+      }
+      if (!grinding && this._grindT > 0) {
+        // off the end (or bailed early): a little pop into the trick window
+        const dur = this._grindT;
+        this._grindT = 0;
+        this.airborne = true;
+        this.vy = 2.4;
+        this.pos.set(nx, this.pos.y + this.vy * dt, nz);
+        if (this.hud && dur > 0.35) {
+          this.hud.trickToast('LOG GRIND', `${dur.toFixed(1)}s on the rail`);
+          this.style += 60 + Math.round(dur * 45);
+        }
+        grinding = true; // the ground logic stays out of it this frame too
+      }
+
+      if (!grinding) {
       const ground = t.heightAt(nx, nz);
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
       this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
@@ -267,6 +300,7 @@ export class Player {
       }
 
       if (!this.airborne) this._collide();
+      }
     } else {
       // ---- air ----
       this._prevPipeQ = null; // re-arm the lip launch only from riding, not landing
@@ -323,7 +357,7 @@ export class Player {
     }
 
     // continuous powder: wake at speed, roost off the drifting edge
-    if (this.fx && !this.airborne && this.speed > 7) {
+    if (this.fx && !this.airborne && !(this._grindT > 0) && this.speed > 7) {
       // a railing edge under load throws its own clean plume even with no
       // slip; sliding (slip) and braking still roost the most
       const carve = Math.abs(this.slip) * 2.2 + Math.abs(this.latA) / 11 + (Math.abs(this.yaw) / MAX_YAW) * 0.25;

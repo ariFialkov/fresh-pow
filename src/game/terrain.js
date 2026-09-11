@@ -274,11 +274,11 @@ export class Terrain {
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
-      const sc = 0.105 + rng() * 0.02;
+      const sc = 0.32 + rng() * 0.05; // a massive fallen giant — ride the bore
       this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
-      // walls flank the bore; three pucks down each side, the middle clear
+      // walls flank the bore; pucks down each side, the middle clear
       for (const side of [-1, 1]) {
-        for (const a of [-32, 0, 32]) {
+        for (const a of [-38, -13, 13, 38]) {
           this.obstacles.push({
             x: x + Math.sin(rot) * a * sc + Math.cos(rot) * side * 21 * sc,
             z: -ts - Math.cos(rot) * a * sc - Math.sin(rot) * side * 21 * sc,
@@ -287,6 +287,23 @@ export class Terrain {
           });
         }
       }
+    }
+
+    // 6) grind rails: a horizontal log poking out of a snow mound right at a
+    // cliff lip — brake sideways onto it, carry momentum along the rail, and
+    // trick off the far end where the ground has already fallen away
+    this.grindLogs = [];
+    for (const d of this.drops) {
+      if (this.grindLogs.length >= 2) break;
+      if (d.h < 3.5 || d.h > 10 || d.s < 320 || d.s > COURSE.length - 320) continue;
+      if (nearBridge(d.s) || nearPipe(d.s)) continue;
+      const gx = this.centerAt(d.s) + (rng() < 0.5 ? -1 : 1) * (7 + rng() * 13);
+      if (onLedgeFace(gx, d.s)) continue;
+      const yaw = (rng() - 0.5) * 0.14; // all but straight down the fall line
+      const len = 13 + rng() * 5;
+      const s0 = d.s - 5; // entry mound sits just uphill of the lip
+      const topY = this.heightAt(gx, -s0) + 1.15; // above the mound this log adds
+      this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), len, topY, bumpH: 0.9 });
     }
 
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
@@ -399,6 +416,15 @@ export class Terrain {
       }
     }
 
+    // entry mounds for the grind rails: a little natural ramp of drifted
+    // snow the log's uphill end sticks out of
+    for (const g of this.grindLogs) {
+      const dsb = s - (g.s0 + 1);
+      const dxb = x - g.x;
+      const q2 = (dxb * dxb + dsb * dsb) / 10.6;
+      if (q2 < 4) h += g.bumpH * Math.exp(-q2);
+    }
+
     // glades ride over rougher, bumpier snow than the groomed corridor
     for (const g of this.glades) {
       if (s > g.s0 - 10 && s < g.s1 + 10) {
@@ -433,6 +459,30 @@ export class Terrain {
       const env = smoothstep(p.s0 - 35, p.s0 + 14, s) * (1 - smoothstep(p.s1 - 14, p.s1 + 35, s));
       if (env < 0.55) continue;
       return { q: (x - (this.centerAt(s) + p.off)) / p.w, env, p };
+    }
+    return null;
+  }
+
+  /**
+   * Grind rail lookup: the point (x, s) projected onto a rail within reach,
+   * or null. Returns the snapped position on the rail axis, the rail's top
+   * height and its heading.
+   */
+  grindAt(x, s) {
+    for (const g of this.grindLogs) {
+      const ds = s - g.s0;
+      const dx = x - g.x;
+      const along = ds * g.az + dx * g.ax;
+      const lat = dx * g.az - ds * g.ax;
+      if (along < 0 || along > g.len || Math.abs(lat) > 0.8) continue;
+      return {
+        along,
+        len: g.len,
+        topY: g.topY,
+        px: g.x + g.ax * along,
+        pz: -(g.s0 + g.az * along),
+        yaw: Math.atan2(g.ax, g.az),
+      };
     }
     return null;
   }
@@ -684,14 +734,46 @@ export class Terrain {
     rocks.castShadow = true;
     group.add(rocks, rockSnow);
 
-    // downed timber props, sunk slightly so they sit bedded in the snow
+    // downed timber props, sunk slightly and seated flush with the slope
+    const qa = new THREE.Quaternion();
+    const qy = new THREE.Quaternion();
     for (const log of this.logs) {
       const inst = createProp(log.kind, this.theme, log.sc);
-      // hollow logs bury their bottom wall so the bore floor sits just
-      // under the snow — you ride in at snow level
-      const sink = log.kind === 'log_hollow' ? 10 * log.sc + 0.1 : 0.28;
-      inst.position.set(log.x, this.heightAt(log.x, log.z) - sink, log.z);
-      inst.rotation.y = log.rot;
+      if (log.kind === 'log_hollow') {
+        // a tube this long has to pitch with the run itself: align the bore
+        // axis end-to-end and bury the bottom wall so the floor of the bore
+        // meets the snow at both mouths
+        const ax = Math.sin(log.rot);
+        const az = Math.cos(log.rot);
+        const halfL = 50 * log.sc;
+        const hUp = this.heightAt(log.x + ax * halfL, log.z + az * halfL);
+        const hDown = this.heightAt(log.x - ax * halfL, log.z - az * halfL);
+        const pitch = Math.atan2(hUp - hDown, 2 * halfL);
+        inst.rotation.order = 'YXZ';
+        inst.rotation.set(-pitch, log.rot, 0);
+        inst.position.set(log.x, (hUp + hDown) / 2 - 10 * log.sc - 0.25, log.z);
+      } else {
+        inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
+        const n = this.normalAt(log.x, log.z);
+        qa.setFromUnitVectors(up, n);
+        qy.setFromAxisAngle(up, log.rot);
+        inst.quaternion.copy(qa).multiply(qy);
+      }
+      inst.traverse((o) => {
+        if (o.isMesh) o.castShadow = true;
+      });
+      group.add(inst);
+    }
+
+    // grind rails: horizontal in world space, uphill end buried in the
+    // entry mound, far end hanging out over the drop
+    for (const g of this.grindLogs) {
+      const inst = createProp('log_small', this.theme, 1);
+      inst.scale.set(g.len / 100 * 1.12, 0.038, 0.028);
+      const mx = g.x + g.ax * (g.len / 2 - 0.8);
+      const mz = -(g.s0 + g.az * (g.len / 2 - 0.8));
+      inst.position.set(mx, g.topY - 20.6 * 0.038, mz);
+      inst.rotation.y = Math.atan2(g.az, g.ax);
       inst.traverse((o) => {
         if (o.isMesh) o.castShadow = true;
       });

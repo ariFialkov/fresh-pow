@@ -155,7 +155,7 @@ export class RaceScene {
         this.player.pos.x,
         this.player.pos.z,
         this.player.yaw,
-        !this.player.airborne,
+        !this.player.airborne && !(this.player._grindT > 0),
         Math.abs(Math.sin(this.player.rider.gearGroup.rotation.y))
       );
       for (const b of this.bots) {
