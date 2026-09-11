@@ -6,6 +6,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mulberry32 } from './rng.js';
 import { COURSE } from './terrain.js';
+import { Trail } from './snowfx.js';
+
+const _n = new THREE.Vector3();
+const _d = new THREE.Vector3();
 
 let animalRoot = null;
 
@@ -49,6 +53,7 @@ export class Animals {
     this.src = (this.spec && animalRoot?.getObjectByName(`animal_${themeKey}`)) || null;
     this.events = [];
     this.active = [];
+    this.trails = []; // hoof tracks keep fading after their animal is gone
     if (!this.src) return;
     const rng = mulberry32((seed ^ 0xa111) >>> 0);
     let s = 360 + rng() * 300;
@@ -82,9 +87,19 @@ export class Animals {
       shadow.scale.setScalar(this.spec.r * 1.5);
       obj.add(shadow);
       this.scene.add(obj);
+      // paired hoof lines pressed into the snow — dashes match the gait
+      const trackW = this.spec.r * 0.18 + 0.05;
+      const tracks = [-1, 1].map((side) => {
+        const trail = new Trail(this.scene, this.terrain, trackW);
+        trail.minDist = 0.5; // short gait dashes need close points to render
+        trail.trackCol.multiplyScalar(0.8); // hoof-churned snow digs darker than a ski line
+        return { off: side * this.spec.r * 0.35, trail };
+      });
+      this.trails.push(...tracks.map((t) => t.trail));
       this.active.push({
         obj,
         body,
+        tracks,
         x,
         s,
         vs: this.spec.speed * (0.85 + rng() * 0.3), // downhill run
@@ -108,12 +123,31 @@ export class Animals {
       a.s += a.vs * dt;
       a.x += a.vx * dt;
       const z = -a.s;
-      const y = this.terrain.heightAt(a.x, z);
+      const L = Math.hypot(a.vx, a.vs) || 1;
+      const dx = a.vx / L;
+      const dz = -a.vs / L;
+      // stand on the slope, not on the point under the center: sample under
+      // nose and tail too, and align the body to the terrain so no half of
+      // it buries into a cross-slope
+      const half = this.spec.r * 1.1;
+      const hC = this.terrain.heightAt(a.x, z);
+      const hN = this.terrain.heightAt(a.x + dx * half, z + dz * half);
+      const hT = this.terrain.heightAt(a.x - dx * half, z - dz * half);
+      const y = Math.max(hC, (hN + hT) / 2) + 0.06;
       const stride = Math.abs(Math.sin(a.t * a.gallop));
       a.obj.position.set(a.x, y, z);
+      this.terrain.normalAt(a.x, z, _n);
+      a.obj.up.copy(_n);
+      const dn = dx * _n.x + dz * _n.z; // travel projected onto the slope
+      _d.set(dx - _n.x * dn, -_n.y * dn, dz - _n.z * dn);
+      a.obj.lookAt(a.x + _d.x, y + _d.y, z + _d.z); // model faces +z
       a.body.position.y = stride * this.spec.bob; // shadow stays on the snow
-      a.obj.rotation.y = Math.atan2(a.vx, -a.vs); // model faces +z
       a.body.rotation.x = Math.sin(a.t * a.gallop * 2) * 0.1; // gallop rock
+      // hooves press dashed bounding tracks during the contact phase
+      const contact = stride < 0.45;
+      for (const tk of a.tracks) {
+        tk.trail.push(a.x - dz * tk.off - dx * half * 0.7, z + dx * tk.off - dz * half * 0.7, contact);
+      }
       // hitting one hurts
       if (player && !player.finished && player.knockT <= 0 && player.stumbleT <= 0 && !player.airborne) {
         const dx = player.pos.x - a.x;
@@ -132,5 +166,6 @@ export class Animals {
       }
     }
     this.active = this.active.filter((a) => !a.dead);
+    for (const t of this.trails) t.update(dt);
   }
 }
