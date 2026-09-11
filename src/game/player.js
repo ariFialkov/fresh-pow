@@ -3,6 +3,7 @@
 // betting result: bots pace themselves around whatever the player does.
 import * as THREE from 'three';
 import { createRider, setPose } from './riderMesh.js';
+import { tubeRadii } from './terrain.js';
 import { clamp, lerp } from './rng.js';
 
 const G = 8; // arcade gravity along the slope — deep snow eats the pull
@@ -463,39 +464,58 @@ export class Player {
 
   /** Flattened by another rider. Harsher than a stumble — you go down. */
   /**
-   * Solid hollow-trunk shells: if the step from pos to (nx, nz) crosses a
-   * tube's inner bore wall (from inside) or outer shell (from outside),
-   * clamp to the wall and redirect the run along the tube axis.
+   * Solid hollow trunks, collided against the shell's real shape: the wood is
+   * a tapered tube, so at the rider's own height it covers a lateral band
+   * running from the bore wall out to the outer surface. A step landing in
+   * that band is pushed back to the face it came from; the open bore, the air
+   * over the top and the buried belly underneath are all free.
    */
   _tubeClamp(nx, nz, dir) {
+    const RIDER = 0.55; // half-width of the board and body
     for (const tb of this.terrain.hollowTubes) {
       const dsN = -nz - tb.s0;
       const dxN = nx - tb.x;
       const alongN = dsN * tb.az + dxN * tb.ax;
       if (Math.abs(alongN) > tb.halfL) continue;
+      const latN = dxN * tb.az - dsN * tb.ax;
       const dsO = -this.pos.z - tb.s0;
       const dxO = this.pos.x - tb.x;
       const alongO = dsO * tb.az + dxO * tb.ax;
       const latO = dxO * tb.az - dsO * tb.ax;
-      const latN = dxN * tb.az - dsN * tb.ax;
-      // running into the cut face of the shell rim stops you cold
-      if (Math.abs(latN) > tb.R && Math.abs(latN) < tb.outR && Math.abs(alongO) > tb.halfL && Math.abs(alongN) <= tb.halfL) {
-        const alongClamp = Math.sign(alongO) * (tb.halfL + 0.3);
-        nx = tb.x + tb.ax * alongClamp + tb.az * latN;
-        nz = -(tb.s0 + tb.az * alongClamp - tb.ax * latN);
+      const { rIn, rOut } = tubeRadii(tb, alongN);
+      const axisY = tb.axY0 + alongN * tb.axSlope;
+      // the wood the standing rider can reach: widest lateral span of the
+      // shell across the board-to-shoulders slice of the section
+      let inner = Infinity;
+      let outer = 0;
+      for (const h of [0.12, 1.5]) {
+        const v = this.pos.y + h - axisY;
+        if (Math.abs(v) >= rOut) continue; // clear over the top or under the belly
+        outer = Math.max(outer, Math.sqrt(rOut * rOut - v * v));
+        inner = Math.min(inner, Math.abs(v) < rIn ? Math.sqrt(rIn * rIn - v * v) : 0);
+      }
+      if (outer === 0) continue;
+      if (inner === Infinity) inner = 0;
+      const aLat = Math.abs(latN);
+      if (aLat + RIDER <= inner || aLat - RIDER >= outer) continue; // in the bore, or clear of the trunk
+      // came in through the bore, or up against the flank from outside?
+      const rO = tubeRadii(tb, alongO);
+      const vO = this.pos.y + 0.12 - (tb.axY0 + alongO * tb.axSlope);
+      const innerO = Math.abs(vO) < rO.rIn ? Math.sqrt(rO.rIn * rO.rIn - vO * vO) : 0;
+      const bore = Math.abs(alongO) <= tb.halfL && Math.abs(latO) < innerO;
+      // running into the cut rim at either mouth stops you cold
+      if (!bore && Math.abs(alongO) > tb.halfL) {
+        const stopA = Math.sign(alongO) * (tb.halfL + 0.35);
+        nx = tb.x + tb.ax * stopA + tb.az * latN;
+        nz = -(tb.s0 + tb.az * stopA - tb.ax * latN);
         this.speed *= 0.25;
         if (!this.airborne && this.stumbleT <= 0) this.stumble('slammed a log');
         continue;
       }
-      let clampLat = null;
-      if (Math.abs(latO) < tb.R && Math.abs(latN) >= tb.R - 0.05) {
-        clampLat = Math.sign(latN || 1) * (tb.R - 0.2);
-      } else if (Math.abs(latO) > tb.outR && Math.abs(latN) <= tb.outR + 0.05) {
-        clampLat = Math.sign(latO) * (tb.outR + 0.2);
-      }
-      if (clampLat == null) continue;
-      nx = tb.x + tb.ax * alongN + tb.az * clampLat;
-      nz = -(tb.s0 + tb.az * alongN - tb.ax * clampLat);
+      const lat = Math.sign(latN || latO || 1) * (bore ? Math.max(0, inner - RIDER) : outer + RIDER);
+      nx = tb.x + tb.ax * alongN + tb.az * lat;
+      nz = -(tb.s0 + tb.az * alongN - tb.ax * lat);
+      // ride it out along the trunk rather than stopping dead against it
       const alongVel = dir.x * tb.ax - dir.z * tb.az;
       this.travelYaw = alongVel >= 0 ? Math.atan2(tb.ax, tb.az) : Math.atan2(-tb.ax, -tb.az);
       this.speed *= Math.min(1, Math.abs(alongVel)) * 0.9;

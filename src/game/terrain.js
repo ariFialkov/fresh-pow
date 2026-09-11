@@ -16,6 +16,31 @@ export const COURSE = {
 
 const GRADE = 0.5; // average downhill grade
 
+// Hollow-trunk geometry, measured off the model itself (100 units long, bore
+// axis running at y = 19.8). Both the bore and the shell taper end to end, so
+// the collider is a tapered tube rather than a plain cylinder.
+const TUBE = {
+  axisY: 19.8, // bore axis height in model units, above the model origin
+  rIn0: 9.8, rInK: 0.05, // bore radius at mid-length, and its taper per unit
+  rOut0: 12.9, rOutK: 0.035, // outer shell, same
+  flare: 1.8, flareA: 26, // both butts swell past this station
+  lift: 1.0, // bury it so the axis rides this far above the snow line
+};
+
+/**
+ * Bore and shell radius in metres at an along-axis offset from a tube's
+ * anchor. `along` and the result are world units; the profile itself is
+ * measured in model units, so it scales with the trunk.
+ */
+export function tubeRadii(tb, along) {
+  const a = clamp(along, -tb.halfL, tb.halfL) / tb.sc;
+  const fl = Math.max(0, (Math.abs(a) - TUBE.flareA) / (50 - TUBE.flareA));
+  return {
+    rIn: (TUBE.rIn0 + TUBE.rInK * a) * tb.sc,
+    rOut: (TUBE.rOut0 + TUBE.rOutK * a + TUBE.flare * fl * fl) * tb.sc,
+  };
+}
+
 // deterministic per-vertex jitter for craggy rock silhouettes
 function hashJitter(a, b, c) {
   const n = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453;
@@ -311,18 +336,32 @@ export class Terrain {
       this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
-    // solid-shell data for the player physics: bore radius and outer shell
+    // Seat the hollow trunks now that the surface is final: pitch each one
+    // with the run and sink it until the bore axis sits just above the snow,
+    // so the mouth opens at its widest right at the surface. Solving it once
+    // here means the shell the player collides with is the shell they see.
     this.hollowTubes = this.logs
       .filter((l) => l.kind === 'log_hollow')
-      .map((l) => ({
-        x: l.x,
-        s0: -l.z,
-        ax: Math.sin(l.rot),
-        az: Math.cos(l.rot),
-        halfL: 50 * l.sc,
-        R: 15 * l.sc,
-        outR: 23 * l.sc,
-      }));
+      .map((l) => {
+        const ax = Math.sin(l.rot);
+        const az = Math.cos(l.rot);
+        const halfL = 50 * l.sc;
+        const hUp = this.heightAt(l.x + ax * halfL, l.z + az * halfL);
+        const hDown = this.heightAt(l.x - ax * halfL, l.z - az * halfL);
+        l.pitch = Math.atan2(hUp - hDown, 2 * halfL);
+        l.axY0 = (hUp + hDown) / 2 + TUBE.lift;
+        l.posY = l.axY0 - TUBE.axisY * l.sc * Math.cos(l.pitch);
+        return {
+          x: l.x,
+          s0: -l.z,
+          ax,
+          az,
+          sc: l.sc,
+          halfL,
+          axY0: l.axY0,
+          axSlope: (hUp - hDown) / (2 * halfL),
+        };
+      });
 
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
     this._treeXf = treeXf;
@@ -775,18 +814,11 @@ export class Terrain {
     for (const log of this.logs) {
       const inst = createProp(log.kind, this.theme, log.sc);
       if (log.kind === 'log_hollow') {
-        // a tube this long has to pitch with the run itself: align the bore
-        // axis end-to-end and bury the bottom wall so the floor of the bore
-        // meets the snow at both mouths
-        const ax = Math.sin(log.rot);
-        const az = Math.cos(log.rot);
-        const halfL = 50 * log.sc;
-        const hUp = this.heightAt(log.x + ax * halfL, log.z + az * halfL);
-        const hDown = this.heightAt(log.x - ax * halfL, log.z - az * halfL);
-        const pitch = Math.atan2(hUp - hDown, 2 * halfL);
+        // pitch and burial were solved with the collider (see the log build)
+        // so the shell the player hits is exactly the shell they see
         inst.rotation.order = 'YXZ';
-        inst.rotation.set(-pitch, log.rot, 0);
-        inst.position.set(log.x, (hUp + hDown) / 2 - 12.5 * log.sc - 0.3, log.z);
+        inst.rotation.set(-log.pitch, log.rot, 0);
+        inst.position.set(log.x, log.posY, log.z);
       } else {
         inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
         const n = this.normalAt(log.x, log.z);
