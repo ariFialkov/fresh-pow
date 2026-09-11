@@ -101,7 +101,7 @@ export class Animals {
         const trail = new Trail(this.scene, this.terrain, trackW);
         trail.minDist = 0.5; // short gait dashes need close points to render
         trail.trackCol.multiplyScalar(0.8); // hoof-churned snow digs darker than a ski line
-        return { off: side * this.spec.r * 0.35, trail };
+        return { off: side * this.spec.r * 0.35, w: trackW, trail };
       });
       this.trails.push(...tracks.map((t) => t.trail));
       this.active.push({
@@ -183,10 +183,12 @@ export class Animals {
       const drop = a.y - (hC + 0.06);
       a.shadow.position.y = -drop + 0.07;
       a.shadow.scale.setScalar(this.spec.r * 1.5 * Math.max(0.35, 1 - drop * 0.12));
-      // hooves press dashed bounding tracks during the contact phase
+      // hooves press dashed bounding tracks during the contact phase, each
+      // dash tapering in and out with the stride so it reads as a real print
       const contact = !a.air && stride < 0.45;
+      const pressW = contact ? Math.max(0.04, a.tracks[0].w * (0.25 + 0.85 * (1 - stride / 0.45))) : undefined;
       for (const tk of a.tracks) {
-        tk.trail.push(a.x - dz * tk.off - dx * half * 0.7, z + dx * tk.off - dz * half * 0.7, contact);
+        tk.trail.push(a.x - dz * tk.off - dx * half * 0.7, z + dx * tk.off - dz * half * 0.7, contact, pressW);
       }
       // hitting one hurts
       if (player && !a.fading && !player.finished && player.knockT <= 0 && player.stumbleT <= 0 && !player.airborne) {

@@ -49,7 +49,7 @@ const logs = await page.evaluate(() => {
 });
 console.log('logs:', JSON.stringify(logs));
 for (const [kind, l] of Object.entries(logs)) {
-  const far = kind === 'log_hollow' ? { dx: 20, dy: 9, dz: 34, ty: 5 } : { dx: 13, dy: 2.6, dz: 4, ty: 1.2 };
+  const far = kind === 'log_hollow' ? { dx: 42, dy: 18, dz: 68, ty: 8 } : { dx: 13, dy: 2.6, dz: 4, ty: 1.2 };
   await page.evaluate((a) => { window.__pin = 300; window.__aim = a; },
     { x: l.x + far.dx, y: l.y + far.dy, z: -(l.s - far.dz), tx: l.x, ty: l.y + far.ty, tz: -l.s });
   await page.waitForTimeout(600);

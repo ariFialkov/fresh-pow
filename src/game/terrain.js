@@ -274,17 +274,31 @@ export class Terrain {
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
-      const sc = 0.32 + rng() * 0.05; // a massive fallen giant — ride the bore
+      const sc = 0.48 + rng() * 0.07; // a colossal fallen giant — ride the bore
       this.logs.push({ x, z: -ts, rot, sc, kind: 'log_hollow' });
       // walls flank the bore; pucks down each side, the middle clear
       for (const side of [-1, 1]) {
-        for (const a of [-38, -13, 13, 38]) {
+        for (const a of [-40, -24, -8, 8, 24, 40]) {
           this.obstacles.push({
             x: x + Math.sin(rot) * a * sc + Math.cos(rot) * side * 21 * sc,
             z: -ts - Math.cos(rot) * a * sc - Math.sin(rot) * side * 21 * sc,
-            r: 3 * sc + 0.2,
+            r: 2 * sc + 0.2,
             kind: 'log',
           });
+        }
+      }
+      // clear any earlier scatter out of the tube's footprint
+      const inTube = (px, ps) => {
+        const dsl = ps - ts;
+        const dxl = px - x;
+        const along = dsl * Math.cos(rot) + dxl * Math.sin(rot);
+        const lat = dxl * Math.cos(rot) - dsl * Math.sin(rot);
+        return Math.abs(along) < 50 * sc + 3 && Math.abs(lat) < 15 * sc + 2;
+      };
+      this.obstacles = this.obstacles.filter((o) => o.kind === 'log' || !inTube(o.x, -o.z));
+      for (const list of [treeXf, rockXf]) {
+        for (let j = list.length - 1; j >= 0; j--) {
+          if (inTube(list[j].x, -list[j].z)) list.splice(j, 1);
         }
       }
     }
@@ -300,10 +314,11 @@ export class Terrain {
       const gx = this.centerAt(d.s) + (rng() < 0.5 ? -1 : 1) * (7 + rng() * 13);
       if (onLedgeFace(gx, d.s)) continue;
       const yaw = (rng() - 0.5) * 0.14; // all but straight down the fall line
-      const len = 13 + rng() * 5;
-      const s0 = d.s - 5; // entry mound sits just uphill of the lip
+      const sc = 0.05 + rng() * 0.012; // a normal-size trunk, just placed level
+      const len = 100 * sc;
+      const s0 = d.s - 2.5; // entry mound at the lip, far end out over the drop
       const topY = this.heightAt(gx, -s0) + 1.15; // above the mound this log adds
-      this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), len, topY, bumpH: 0.9 });
+      this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
     this.obstacles.sort((a, b) => -a.z - -b.z); // ascending s
@@ -414,6 +429,27 @@ export class Terrain {
         const face = L.uFace + noise1(s * 0.02, this.seed + 7) * 0.05;
         h += L.h * env * smoothstep(face, face + 0.045, u * L.side);
       }
+    }
+
+    // inside a hollow trunk the snow lies in a smooth cylindrical gutter —
+    // carry speed up the curved walls and swoop back down the other side;
+    // ride out the end up on a wall and the ground simply falls away
+    for (const log of this.logs) {
+      if (log.kind !== 'log_hollow') continue;
+      const s0l = -log.z;
+      const axl = Math.sin(log.rot);
+      const azl = Math.cos(log.rot);
+      const dsl = s - s0l;
+      const dxl = x - log.x;
+      const along = dsl * azl + dxl * axl;
+      const halfL = 50 * log.sc;
+      if (Math.abs(along) > halfL) continue;
+      const lat = dxl * azl - dsl * axl;
+      const R = 15 * log.sc;
+      if (Math.abs(lat) > R) continue;
+      const Rc = 16.5 * log.sc;
+      const env = smoothstep(0.5, 4.5, halfL - Math.abs(along));
+      h += env * (Rc - Math.sqrt(Math.max(0, Rc * Rc - lat * lat)));
     }
 
     // entry mounds for the grind rails: a little natural ramp of drifted
@@ -751,7 +787,7 @@ export class Terrain {
         const pitch = Math.atan2(hUp - hDown, 2 * halfL);
         inst.rotation.order = 'YXZ';
         inst.rotation.set(-pitch, log.rot, 0);
-        inst.position.set(log.x, (hUp + hDown) / 2 - 10 * log.sc - 0.25, log.z);
+        inst.position.set(log.x, (hUp + hDown) / 2 - 12.5 * log.sc - 0.3, log.z);
       } else {
         inst.position.set(log.x, this.heightAt(log.x, log.z) - 0.28, log.z);
         const n = this.normalAt(log.x, log.z);
@@ -768,11 +804,10 @@ export class Terrain {
     // grind rails: horizontal in world space, uphill end buried in the
     // entry mound, far end hanging out over the drop
     for (const g of this.grindLogs) {
-      const inst = createProp('log_small', this.theme, 1);
-      inst.scale.set(g.len / 100 * 1.12, 0.038, 0.028);
-      const mx = g.x + g.ax * (g.len / 2 - 0.8);
-      const mz = -(g.s0 + g.az * (g.len / 2 - 0.8));
-      inst.position.set(mx, g.topY - 20.6 * 0.038, mz);
+      const inst = createProp('log_small', this.theme, g.sc);
+      const mx = g.x + g.ax * (g.len / 2 - 0.5);
+      const mz = -(g.s0 + g.az * (g.len / 2 - 0.5));
+      inst.position.set(mx, g.topY - 20.6 * g.sc, mz);
       inst.rotation.y = Math.atan2(g.az, g.ax);
       inst.traverse((o) => {
         if (o.isMesh) o.castShadow = true;
