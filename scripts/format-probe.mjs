@@ -66,19 +66,27 @@ for (const f of list) {
       const P = r.player;
       P.pos.set(j.x, t.groundAt(j.x, -(j.s - 60)), -(j.s - 60));
       P.speed = 24; P.airborne = false; P.yaw = P.travelYaw = 0;
-      const rec = { launched: false, maxH: 0, landS: null, vy: 0 };
+      const rec = { launched: false, maxH: 0, landS: null, vy: 0, launchS: null, launchSpeed: 0, airT: 0, maxAboveLaunch: 0, trace: [] };
       const orig = r.update.bind(r);
       let wasAir = false;
+      let launchY = 0;
       r.update = (dt) => {
         orig(dt);
         if (!P.airborne) P.yaw = P.travelYaw = 0;
-        if (P.airborne && !wasAir) { rec.launched = true; rec.vy = +P.vy.toFixed(1); }
-        if (P.airborne) rec.maxH = Math.max(rec.maxH, P.pos.y - t.heightAt(P.pos.x, P.pos.z));
+        if (P.airborne && !wasAir) { rec.launched = true; rec.vy = +P.vy.toFixed(1); rec.launchS = +(P.progress - j.s).toFixed(1); rec.launchSpeed = +P.speed.toFixed(1); launchY = P.pos.y; }
+        if (P.airborne) {
+          rec.airT += dt;
+          rec.maxH = Math.max(rec.maxH, P.pos.y - t.heightAt(P.pos.x, P.pos.z));
+          rec.maxAboveLaunch = Math.max(rec.maxAboveLaunch, P.pos.y - launchY);
+          if (rec.trace.length < 40) rec.trace.push([+(P.progress - j.s).toFixed(0), +(P.pos.y - t.heightAt(P.pos.x, P.pos.z)).toFixed(1), +P.vy.toFixed(1)]);
+        }
         if (!P.airborne && wasAir && rec.landS == null) rec.landS = +(P.progress - j.s).toFixed(1);
         wasAir = P.airborne;
       };
       const t0 = performance.now();
-      while (performance.now() - t0 < 40000 && P.progress < j.s + 150 && rec.landS == null) await new Promise((k) => requestAnimationFrame(k));
+      while (performance.now() - t0 < 60000 && P.progress < j.s + 260 && rec.landS == null) await new Promise((k) => requestAnimationFrame(k));
+      rec.airT = +rec.airT.toFixed(2);
+      rec.maxAboveLaunch = +rec.maxAboveLaunch.toFixed(1);
       r.update = orig;
       rec.maxH = +rec.maxH.toFixed(1);
       return rec;
