@@ -33,6 +33,7 @@ export class Bot {
     this.frozen = true;
     this.finished = false;
     this.finishTime = null;
+    this.style = 0; // trick tally, dealt by the race around the player's (formats.js)
     this.stumbleT = 0;
     this.autopilot = false; // set when the player stalls out mid-race
 
@@ -80,7 +81,7 @@ export class Bot {
     if (this.knockT > 0) this.knockT -= dt;
     const knocked = Math.max(0, Math.min(1, Math.min(this.knockT * 3, (1.6 - this.knockT) * 4)));
 
-    const L = COURSE.length;
+    const L = this.terrain.length;
     const playerD = race.player.progress;
     const playerFinished = race.player.finished;
 

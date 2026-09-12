@@ -298,7 +298,7 @@ export class Player {
       } else if (ground < this.pos.y - 0.55 && this.speed > 6) {
         // ground fell away — takeoff
         this.airborne = true;
-        this.vy = clamp(this.groundVy, 0, 9);
+        this.vy = clamp(this.groundVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
         // pop: released tuck right at the lip
         if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
           this.vy += 4.2;

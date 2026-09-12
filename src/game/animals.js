@@ -57,7 +57,7 @@ export class Animals {
     if (!this.src) return;
     const rng = mulberry32((seed ^ 0xa111) >>> 0);
     let s = 360 + rng() * 300;
-    while (s < COURSE.length - 380) {
+    while (s < this.terrain.length - 380) {
       this.events.push({
         s,
         side: rng() < 0.5 ? -1 : 1,
@@ -204,7 +204,7 @@ export class Animals {
       if (
         !a.fading &&
         (a.s < playerS - 80 ||
-          a.s > COURSE.length - 40 ||
+          a.s > this.terrain.length - 40 ||
           Math.abs(a.x - this.terrain.centerAt(a.s)) > COURSE.halfWidth * 1.5)
       ) {
         a.fading = true;

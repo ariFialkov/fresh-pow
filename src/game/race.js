@@ -2,7 +2,8 @@
 // The finishing order was drawn from the paytable before the gates open —
 // everything the bots do afterwards is theater in service of that draw.
 import * as THREE from 'three';
-import { Terrain, COURSE } from './terrain.js';
+import { Terrain } from './terrain.js';
+import { FORMATS, liveBotStyle, settleScores } from './formats.js';
 import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
@@ -25,12 +26,13 @@ export class RaceScene {
     this.cb = cb;
     this.input = input;
     this.event = opts.event ?? EVENTS[2];
+    this.format = opts.format ?? FORMATS[0];
     const theme = THEMES[this.event.theme];
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(theme.fog, theme.fogNear * 0.8, theme.fogFar * 0.85);
     this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 4000);
 
-    this.terrain = new Terrain(opts.seed, theme);
+    this.terrain = new Terrain(opts.seed, theme, this.format.id);
     const tg = new THREE.Group();
     this.terrain.build(tg);
     this.scene.add(tg);
@@ -44,7 +46,7 @@ export class RaceScene {
     state.balance = Math.round((state.balance - opts.bet) * 100) / 100;
     save();
 
-    this.hud = new RaceHud();
+    this.hud = new RaceHud(this.format);
     // spray matches this mountain's snow tone, lifted toward white the way
     // airborne powder catches the light
     const sprayCol = new THREE.Color(this.terrain.theme.snow).lerp(new THREE.Color(1, 1, 1), 0.75);
@@ -52,7 +54,10 @@ export class RaceScene {
     this.pyro = new SprayPool(this.scene, 320, { color: [1, 0.7, 0.3], blending: THREE.AdditiveBlending, gravity: 5 });
     this.gate = new StartGate(this.terrain);
     this.scene.add(this.gate.group);
-    this.animals = new Animals(this.scene, this.terrain, this.event.theme, opts.seed);
+    // the judged showpieces keep the course clear — no wildlife crossing the pipe
+    this.animals = this.format.scored === 'style'
+      ? { events: [], active: [], update() {} }
+      : new Animals(this.scene, this.terrain, this.event.theme, opts.seed);
     const laneNames = [null, null, 'You', null, null];
     for (const b of opts.bots) laneNames[b.lane] = b.identity.name;
     this.gate.setRoster(laneNames);
@@ -101,9 +106,9 @@ export class RaceScene {
     this._resultsShown = false;
 
     // finish-line pyro: fires when the first rider crosses
-    const fcx = this.terrain.centerAt(COURSE.length);
+    const fcx = this.terrain.centerAt(this.terrain.length);
     this._finishPorts = [-15, 15].map(
-      (off) => new THREE.Vector3(fcx + off, this.terrain.heightAt(fcx + off, -COURSE.length) + 9.8, -COURSE.length)
+      (off) => new THREE.Vector3(fcx + off, this.terrain.heightAt(fcx + off, -this.terrain.length) + 9.8, -this.terrain.length)
     );
     this._finishPyroT = -1;
 
@@ -172,7 +177,7 @@ export class RaceScene {
       this._enforceDrawnOrder(dt);
 
       // player crosses the line
-      if (!this.player.finished && this.player.progress >= COURSE.length) {
+      if (!this.player.finished && this.player.progress >= this.terrain.length) {
         this.player.finished = true;
         this.finishOrder.push({ name: 'You', color: 0xfbbf24, me: true });
         this._firstCross();
@@ -181,18 +186,28 @@ export class RaceScene {
       }
     }
 
-    // live standings: race order by distance (finished riders keep their slot)
+    // bots' trick tallies are dealt around the player's — and never ahead
+    // of a player who hasn't scored yet, so with zero on the board the draw
+    // alone orders the judges' sheet
+    const L = this.terrain.length;
+    for (const b of this.bots) {
+      b.style = liveBotStyle(this.player.style, this.outcome.playerPos - b.rank, b.d / L);
+    }
+    // live standings: race order by distance, or the judges' running tally
+    // for the style formats (ties broken by the draw)
+    const judged = this.format.scored === 'style';
     const live = [
-      { name: 'You', color: 0xfbbf24, me: true, d: this.player.progress, done: this.player.finished },
-      ...this.bots.map((b) => ({ name: b.identity.name, color: b.identity.color, me: false, d: b.d, done: b.finished })),
-    ].sort((a, b) => b.d - a.d);
+      { name: 'You', color: 0xfbbf24, me: true, d: this.player.progress, done: this.player.finished, pts: this.player.style, pos: this.outcome.playerPos },
+      ...this.bots.map((b) => ({ name: b.identity.name, color: b.identity.color, me: false, d: b.d, done: b.finished, pts: b.style, pos: b.rank })),
+    ].sort((a, b) => (judged ? b.pts - a.pts || a.pos - b.pos : b.d - a.d));
     const rank = live.findIndex((r) => r.me) + 1;
 
     this.hud.update({
       rank,
       speed: this.player.speed,
-      progress: Math.min(1, this.player.progress / COURSE.length),
+      progress: Math.min(1, this.player.progress / L),
       board: live,
+      style: this.player.style,
     });
 
     // neon FINISH signage: a lazy celebratory pulse that goes frantic once
@@ -283,7 +298,7 @@ export class RaceScene {
     const playerD = this.player.progress;
     const active = this.bots.filter((b) => !b.finished);
     if (!active.length) return;
-    const near = Math.max(playerD, ...active.map((b) => b.d)) > 0.86 * COURSE.length;
+    const near = Math.max(playerD, ...active.map((b) => b.d)) > 0.86 * this.terrain.length;
     if (!near) return;
 
     active.sort((a, b) => a.rank - b.rank); // rank 1 must cross first = largest d
@@ -293,13 +308,13 @@ export class RaceScene {
       const need = worse.d + 2.2 - better.d;
       if (need > 0) {
         // urgent when the worse-ranked rider is closing on the line
-        const rate = worse.d > COURSE.length - 25 ? 80 : 18;
+        const rate = worse.d > this.terrain.length - 25 ? 80 : 18;
         better.d += Math.min(need, rate * dt);
       }
     }
     if (!this.player.finished) {
       // same progressive ceiling the bots use themselves — never a snap-back
-      const L = COURSE.length;
+      const L = this.terrain.length;
       const allowance = 38 * (1 - smoothstep(L - 260, L - 130, playerD));
       for (const b of active) {
         if (!b.ahead) b.d = Math.min(b.d, Math.max(playerD - 4 + allowance, 2), L - 55);
@@ -314,16 +329,28 @@ export class RaceScene {
     state.balance = Math.round((state.balance + payout) * 100) / 100;
     save();
 
-    // full standings from the draw
+    // the sheet: the player's numbers are real, the bots' are dealt so the
+    // format's totals rank in the drawn order (bots still on course get a
+    // finish time projected at their current pace)
+    const L = this.terrain.length;
+    const scores = settleScores(this.format, {
+      playerPos,
+      playerStyle: this.player.style,
+      playerTime: this.time,
+      bots: this.bots.map((b) => ({ rank: b.rank, time: b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed) })),
+      rng: mulberry32(this.terrain.seed ^ 0x5c0e),
+    });
+    for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.rank).style;
     const rows = [
-      { pos: playerPos, name: 'You', color: 0xfbbf24, me: true, mult: multiplierFor(playerPos, this.event.table) },
-      ...this.bots.map((b) => ({ pos: b.rank, name: b.identity.name, color: b.identity.color, me: false })),
+      { pos: playerPos, name: 'You', color: 0xfbbf24, me: true, mult: multiplierFor(playerPos, this.event.table), score: scores.player },
+      ...this.bots.map((b) => ({ pos: b.rank, name: b.identity.name, color: b.identity.color, me: false, score: scores.bots.find((r) => r.rank === b.rank) })),
     ].sort((a, b) => a.pos - b.pos);
 
     if (this._resultsShown) return;
     this._resultsShown = true;
     showResults({
       event: this.event,
+      format: this.format,
       standings: rows,
       playerPos,
       bet,

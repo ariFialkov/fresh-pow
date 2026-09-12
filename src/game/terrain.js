@@ -8,6 +8,7 @@ import { mulberry32, noise1, fbm2, clamp, lerp, smoothstep } from './rng.js';
 import { THEMES } from './themes.js';
 import { createProp } from './props.js';
 import { RAMP_APRON } from './startgate.js';
+import { formatById } from './formats.js';
 
 export const COURSE = {
   length: 1800, // meters from gate to finish line (s = -z)
@@ -49,23 +50,35 @@ function hashJitter(a, b, c) {
 }
 
 export class Terrain {
-  constructor(seed, theme = THEMES.utah) {
+  constructor(seed, theme = THEMES.utah, format = 'race') {
     this.seed = seed >>> 0;
     this.theme = theme;
+    // the format sets the course: the full mountain, a short sprint through
+    // the trees, or a single showpiece (one kicker, one long pipe) with
+    // nothing else in the way
+    this.format = format;
+    this.length = formatById(format).length;
+    const showpiece = format === 'bigair' || format === 'halfpipe';
     const rng = mulberry32(this.seed);
     this.ph = Array.from({ length: 8 }, () => rng() * Math.PI * 2);
 
     // ---- discrete features along the run ----
     this.jumps = [];
     let s = 170 + rng() * 80;
-    while (s < COURSE.length - 220) {
-      this.jumps.push({ s, x: this.centerAt(s) + (rng() - 0.5) * 36, w: 15 + rng() * 6 });
-      s += 190 + rng() * 150;
+    if (format === 'bigair') {
+      // the one kicker: a wide table square across the run, with a full
+      // landing hill before the line
+      this.jumps.push({ s: 300, x: this.centerAt(300), w: 30, big: true });
+    } else if (!showpiece) {
+      while (s < this.length - 220) {
+        this.jumps.push({ s, x: this.centerAt(s) + (rng() - 0.5) * 36, w: 15 + rng() * 6 });
+        s += 190 + rng() * 150;
+      }
     }
 
     this.drops = [];
     s = 320 + rng() * 160;
-    while (s < COURSE.length - 300) {
+    while (!showpiece && s < this.length - 300) {
       // keep cliffs clear of kickers
       if (!this.jumps.some((j) => Math.abs(j.s - s) < 60)) {
         this.drops.push({ s, h: (4 + rng() * 6) * theme.cliffMul });
@@ -75,13 +88,13 @@ export class Terrain {
 
     // one mega cliff for the drama
     const megaS = 700 + rng() * 600;
-    if (!this.jumps.some((j) => Math.abs(j.s - megaS) < 80)) {
+    if (!showpiece && megaS < this.length - 300 && !this.jumps.some((j) => Math.abs(j.s - megaS) < 80)) {
       this.drops.push({ s: megaS, h: (12 + rng() * 5) * Math.max(0.7, theme.cliffMul) });
     }
 
     this.crevices = [];
-    for (let i = 0; i < 4; i++) {
-      const cs = 250 + rng() * (COURSE.length - 500);
+    for (let i = 0; i < (showpiece ? 0 : 4); i++) {
+      const cs = 250 + rng() * (this.length - 500);
       if (this.jumps.some((j) => Math.abs(j.s - cs) < 50)) continue;
       this.crevices.push({ s: cs, x: this.centerAt(cs) + (rng() - 0.5) * 70, w: 14 + rng() * 12, d: 2.5 + rng() * 2 });
     }
@@ -90,7 +103,7 @@ export class Terrain {
     // over the top, or thread the open notch straight through
     this.bridges = [];
     let bs = 340 + rng() * 160;
-    while (bs < COURSE.length - 320) {
+    while (!showpiece && bs < this.length - 320) {
       const clear = !this.jumps.some((j) => Math.abs(j.s - bs) < 80) && !this.drops.some((d) => Math.abs(d.s - bs) < 90);
       if (clear) {
         this.bridges.push({
@@ -110,8 +123,9 @@ export class Terrain {
 
     // spines: long ridges running down the fall line — pick a side
     this.spines = [];
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < (showpiece ? 0 : 2); i++) {
       const s0 = 420 + rng() * 700;
+      if (s0 > this.length - 340) continue;
       this.spines.push({
         s0,
         s1: s0 + 220 + rng() * 200,
@@ -124,8 +138,13 @@ export class Terrain {
     // natural half-pipe: a carved U-channel running down the fall line —
     // pump the transitions for big airs and trick points
     this.pipes = [];
-    for (let tries = 0; tries < 24 && this.pipes.length === 0; tries++) {
-      const ps = 380 + rng() * (COURSE.length - 800);
+    if (format === 'halfpipe') {
+      // the whole run is the pipe: wall to wall from just below the gate to
+      // a short run-out before the line
+      this.pipes.push({ s0: 140, s1: this.length - 200, off: 0, w: 14, d: 7.4 });
+    }
+    for (let tries = 0; tries < 24 && this.pipes.length === 0 && !showpiece; tries++) {
+      const ps = 380 + rng() * (this.length - 800);
       const pe = ps + 80 + rng() * 35;
       const clear =
         !this.jumps.some((j) => j.s > ps - 35 && j.s < pe + 45) &&
@@ -140,8 +159,8 @@ export class Terrain {
     // cliffside ledges: a sheer-faced rock shelf along one side — a wall to
     // dodge from below, a drop-off trick line from above
     this.ledges = [];
-    for (let tries = 0; tries < 14 && this.ledges.length < 2; tries++) {
-      const ls = 300 + rng() * (COURSE.length - 700);
+    for (let tries = 0; tries < 14 && this.ledges.length < 2 && !showpiece; tries++) {
+      const ls = 300 + rng() * (this.length - 700);
       const le = ls + 100 + rng() * 60;
       const clear =
         !this.jumps.some((j) => j.s > ls - 30 && j.s < le + 30) &&
@@ -176,14 +195,14 @@ export class Terrain {
     };
 
     const nearBridge = (ts) => this.bridges.some((b) => Math.abs(b.s - ts) < b.len + 12);
-    const nearJump = (ts) => this.jumps.some((j) => Math.abs(j.s - ts) < 50);
+    const nearJump = (ts) => this.jumps.some((j) => Math.abs(j.s - ts) < (j.big ? 150 : 50));
 
     // 1) boundary treelines: continuous groomed run edges, like a real hill
     const treeMul = theme.treeMul;
     const edgeStep = clamp(11 / Math.max(0.05, treeMul), 6, 200);
     for (const side of [-1, 1]) {
       let ts = 70 + rng() * 8;
-      while (ts < COURSE.length + 60) {
+      while (ts < this.length + 60) {
         const wiggle = noise1(ts * 0.01 + side * 3.3, this.seed + 5) * 0.08;
         const u = 0.94 + wiggle + rng() * 0.08;
         addTree(this.centerAt(ts) + side * COURSE.halfWidth * u, ts, u < 1.0);
@@ -210,8 +229,16 @@ export class Terrain {
         return Math.abs(us - L.uFace) < 0.09;
       });
     this.glades = [];
-    let gs = treeMul < 0.3 ? COURSE.length : 220 + rng() * 200; // treeless venues skip glades
-    while (gs < COURSE.length - 260) {
+    if (format === 'glade') {
+      // the sprint IS the glade: both shoulders forested nearly to the centre
+      // line, with a winding cleared lane on each side to thread
+      for (const side of [-1, 1]) {
+        this.glades.push({ s0: 150, s1: this.length - 170, side, depth: 0.9, pathPh: rng() * Math.PI * 2, pathFreq: 0.018 + rng() * 0.01 });
+      }
+    }
+    // treeless venues and showpiece formats skip the random glades
+    let gs = treeMul < 0.3 || showpiece || format === 'glade' ? this.length : 220 + rng() * 200;
+    while (gs < this.length - 260) {
       if (!nearBridge(gs) && !nearJump(gs) && !nearPipe(gs)) {
         this.glades.push({
           s0: gs,
@@ -244,9 +271,9 @@ export class Terrain {
     }
 
     // 3) slalom hazards inside the run — enough to keep the open snow honest
-    const loneTrees = Math.round(34 * clamp(treeMul, 0.1, 1.2));
+    const loneTrees = showpiece ? 0 : Math.round(34 * clamp(treeMul, 0.1, 1.2));
     for (let i = 0; i < loneTrees; i++) {
-      const ts = 150 + rng() * (COURSE.length - 280);
+      const ts = 150 + rng() * (this.length - 280);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.1;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       addTree(x, ts, true);
@@ -255,7 +282,7 @@ export class Terrain {
     // 4) rockfall clusters at the wall bases + a handful of lone boulders
     const clusters = clamp(Math.round(4 * theme.rockMul), 2, 8);
     for (let ci = 0; ci < clusters; ci++) {
-      const cs = 200 + rng() * (COURSE.length - 420);
+      const cs = 200 + rng() * (this.length - 420);
       if (nearBridge(cs) || nearJump(cs)) continue;
       const side = rng() < 0.5 ? -1 : 1;
       const cxr = this.centerAt(cs) + side * COURSE.halfWidth * (0.7 + rng() * 0.22);
@@ -267,9 +294,9 @@ export class Terrain {
         addRock(rx, rs, true);
       }
     }
-    const loneRocks = clamp(Math.round(26 * theme.rockMul), 8, 55);
+    const loneRocks = showpiece ? 0 : clamp(Math.round(26 * theme.rockMul), 8, 55);
     for (let i = 0; i < loneRocks; i++) {
-      const ts = 160 + rng() * (COURSE.length - 320);
+      const ts = 160 + rng() * (this.length - 320);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.4;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       addRock(x, ts, Math.abs(x - this.centerAt(ts)) < COURSE.halfWidth);
@@ -278,9 +305,9 @@ export class Terrain {
     // logs laid down the fall line — ride straight through the bore, but
     // the flanks hit like any trunk
     this.logs = [];
-    const nLogs = 7 + Math.floor(rng() * 5);
+    const nLogs = showpiece ? 0 : 7 + Math.floor(rng() * 5);
     for (let i = 0; i < nLogs; i++) {
-      const ts = 180 + rng() * (COURSE.length - 360);
+      const ts = 180 + rng() * (this.length - 360);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 1.15;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       const rot = rng() * Math.PI * 2;
@@ -304,7 +331,7 @@ export class Terrain {
     this.grindLogs = [];
     for (const d of this.drops) {
       if (this.grindLogs.length >= 2) break;
-      if (d.h < 3.5 || d.h > 10 || d.s < 320 || d.s > COURSE.length - 320) continue;
+      if (d.h < 3.5 || d.h > 10 || d.s < 320 || d.s > this.length - 320) continue;
       if (nearBridge(d.s) || nearPipe(d.s)) continue;
       const gx = this.centerAt(d.s) + (rng() < 0.5 ? -1 : 1) * (7 + rng() * 13);
       if (onLedgeFace(gx, d.s)) continue;
@@ -321,8 +348,8 @@ export class Terrain {
     // straight line between its two ends, so a site is only kept when the
     // ground along the bore stays close to that line — no dip to fall
     // through, no bump up into the ceiling
-    for (let i = 0, want = 1 + (rng() < 0.55 ? 1 : 0), tries = 0; i < want && tries < 40; tries++) {
-      const ts = 280 + rng() * (COURSE.length - 620);
+    for (let i = 0, want = showpiece ? 0 : 1 + (rng() < 0.55 ? 1 : 0), tries = 0; i < want && tries < 40; tries++) {
+      const ts = 280 + rng() * (this.length - 620);
       const x = this.centerAt(ts) + (rng() - 0.5) * COURSE.halfWidth * 0.8;
       if (nearJump(ts) || nearBridge(ts) || inPipe(x, ts) || onLedgeFace(x, ts)) continue;
       const rot = (rng() - 0.5) * 0.4; // bore roughly down the fall line
@@ -404,20 +431,20 @@ export class Terrain {
 
   /** Centerline x of the valley at distance s downhill. */
   centerAt(s) {
-    const u = clamp(s, 0, COURSE.length);
+    const u = clamp(s, 0, this.length);
     return 24 * Math.sin(u * 0.0081 + this.ph[0]) + 16 * Math.sin(u * 0.0031 + this.ph[1]);
   }
 
   /** Terrain height. Pure function of (x, z) and the seed. */
   heightAt(x, z) {
     const s = -z;
-    const su = clamp(s, 0, COURSE.length);
+    const su = clamp(s, 0, this.length);
 
     // base descent: average grade with long rollers; flattens into a runout past the line
     let gs;
     if (s < 0) gs = s; // rises behind the gates — natural backstop
-    else if (s <= COURSE.length) gs = s;
-    else gs = COURSE.length + (s - COURSE.length) * 0.12;
+    else if (s <= this.length) gs = s;
+    else gs = this.length + (s - this.length) * 0.12;
     let h = -GRADE * gs + 16 * Math.sin(su * 0.011 + this.ph[2]) + 9 * Math.sin(su * 0.0047 + this.ph[3]);
 
     // valley cross-section: gentle dish + steep walls past the course edge
@@ -447,6 +474,18 @@ export class Terrain {
     for (const j of this.jumps) {
       const lat = 1 - ((x - j.x) / j.w) ** 2;
       if (lat <= 0) continue;
+      if (j.big) {
+        // Big Air: a 20 m table curling up to a lip that actually points
+        // uphill of the grade, a knuckle drop, then a long landing hill that
+        // falls away to give the flight somewhere to end
+        const t = (s - (j.s - 20)) / 20;
+        if (t > 0 && t <= 1) h += 12.5 * t * t * lat;
+        else if (s > j.s && s < j.s + 110) {
+          const u = (s - j.s) / 110;
+          h += lat * (9 * (1 - u) - 5 * Math.sin(Math.PI * u));
+        }
+        continue;
+      }
       const t = (s - (j.s - 16)) / 16;
       if (t > 0 && t <= 1) h += 5.2 * t * t * lat;
       else if (s > j.s && s < j.s + 34) h -= 2.8 * (1 - (s - j.s) / 34) * lat; // carved landing
@@ -610,6 +649,12 @@ export class Terrain {
    * Normal of the surface riders stand on (see groundAt) — the snow's slope
    * would pitch a board nose-down through the shallower start ramp.
    */
+  /** How hard a takeoff may throw the rider up: the Big Air lip sends it. */
+  launchCapAt(s) {
+    for (const j of this.jumps) if (j.big && Math.abs(s - j.s) < 25) return 15;
+    return 9;
+  }
+
   groundNormalAt(x, z, out = new THREE.Vector3()) {
     const e = 0.6;
     const dx = this.groundAt(x + e, z) - this.groundAt(x - e, z);
@@ -742,7 +787,7 @@ export class Terrain {
     const colRock = new THREE.Color(this.theme.rock);
     const tmp = new THREE.Color();
 
-    for (let s0 = -60; s0 < COURSE.length + 180; s0 += stripLen) {
+    for (let s0 = -60; s0 < this.length + 180; s0 += stripLen) {
       const cx = this.centerAt(s0 + stripLen / 2);
       const nx = xs.length, nz = rows + 1;
 
@@ -950,7 +995,7 @@ export class Terrain {
     const flagGeo = new THREE.PlaneGeometry(0.7, 0.45);
     flagGeo.translate(0.4, 1.8, 0);
     const flags = [];
-    for (let s = 90; s < COURSE.length; s += 90) flags.push(s);
+    for (let s = 90; s < this.length; s += 90) flags.push(s);
     const poleMat = new THREE.MeshLambertMaterial({ color: 0x2c3440 });
     const redMat = new THREE.MeshLambertMaterial({ color: 0xd6452f, side: THREE.DoubleSide });
     const blueMat = new THREE.MeshLambertMaterial({ color: 0x2f6fd6, side: THREE.DoubleSide });
@@ -980,7 +1025,7 @@ export class Terrain {
 
     // ---- finish venue: the uploaded arch, podium and grandstands,
     // tinted to this event's palette ----
-    const s = COURSE.length;
+    const s = this.length;
     const cx = this.centerAt(s);
 
     const arch = createProp('finish_line', this.theme);

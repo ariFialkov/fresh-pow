@@ -154,13 +154,18 @@ export class MenuHud {
 
 // ---------------------------------------------------------------- race ----
 export class RaceHud {
-  constructor(riders /* [{name, color, me}] in lane order */) {
+  /** @param {object} format tonight's format (formats.js) — sets the badge and the judged readouts */
+  constructor(format) {
+    this.format = format;
+    const judged = format && format.scored !== 'time';
     const el = document.createElement('div');
     el.id = 'race-ui';
     el.innerHTML = `
       <div id="countdown" class="hidden"></div>
       <div class="race-top">
         <div class="panel" id="rank-box"><div class="pos">–</div><div class="of">of 5</div></div>
+        <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
+        <div class="panel" id="style-box"${judged ? '' : ' style="display:none"'}><div class="sty">0</div><div class="unit">style</div></div>
         <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
       </div>
       <div class="panel" id="progress-wrap">
@@ -173,7 +178,6 @@ export class RaceHud {
       <div class="controls-hint" id="controls-hint"></div>`;
     ui().appendChild(el);
     this.el = el;
-    this.riders = riders;
 
     const touch = matchMedia('(pointer: coarse)').matches;
     el.querySelector('#controls-hint').textContent = touch
@@ -198,17 +202,19 @@ export class RaceHud {
     if (text === '') c.classList.add('hidden');
   }
 
-  update({ rank, speed, progress, board }) {
+  update({ rank, speed, progress, board, style = 0 }) {
     const sfx = ['st', 'nd', 'rd', 'th', 'th'][rank - 1] || 'th';
     this.el.querySelector('#rank-box .pos').innerHTML = `${rank}<small>${sfx}</small>`;
     this.el.querySelector('#speed-box .spd').textContent = Math.round(speed * 3.6);
+    this.el.querySelector('#style-box .sty').textContent = Math.round(style);
     this.el.querySelector('#progress-fill').style.width = `${Math.min(100, progress * 100).toFixed(1)}%`;
     if (board) {
+      const judged = this.format && this.format.scored !== 'time';
       this.el.querySelector('#mini-board').innerHTML = board
         .map(
           (r) => `<div class="row${r.me ? ' me' : ''}">
             <span class="dot" style="background:#${r.color.toString(16).padStart(6, '0')}"></span>
-            <span class="nm">${r.name}</span>${r.done ? '🏁' : ''}</div>`
+            <span class="nm">${r.name}</span>${judged && r.pts != null ? `<span class="pts">${Math.round(r.pts)}</span>` : ''}${r.done ? '🏁' : ''}</div>`
         )
         .join('');
     }
@@ -241,7 +247,7 @@ export class RaceHud {
  * Slot-machine draw for tonight's event: cycles venue cards fast, decelerates
  * over ~2 s, locks onto the chosen event with its prize table, then continues.
  */
-export function showEventRoller(events, chosen, onDone) {
+export function showEventRoller(events, chosen, formats, format, onDone) {
   const el = document.createElement('div');
   el.id = 'event-roller';
   el.innerHTML = `
@@ -290,13 +296,31 @@ export function showEventRoller(events, chosen, onDone) {
             .map((r) => `<span class="ev-cell"><i>${r.pos}${['st', 'nd', 'rd', 'th', 'th'][r.pos - 1]}</i><b>&times;${r.mult}</b></span>`)
             .join('')}
         </div>`;
+      // second reel: the format, spun quickly and locked in under the venue
+      const fmtEl = document.createElement('div');
+      fmtEl.className = 'ev-format';
+      detail.appendChild(fmtEl);
+      const fr = [...formats].sort(() => Math.random() - 0.5);
+      let fi = 0;
+      let fd = 60;
+      const fspin = () => {
+        fmtEl.innerHTML = `Format <b>${fr[fi % fr.length].short}</b>`;
+        fi++;
+        fd *= 1.22;
+        if (fd < 300) setTimeout(fspin, fd);
+        else {
+          fmtEl.innerHTML = `Format <b>${format.short}</b><span class="fmt-tag">${format.tag}</span>`;
+          fmtEl.classList.add('fmt-locked');
+        }
+      };
+      fspin();
       setTimeout(() => {
         el.classList.add('ev-out');
         setTimeout(() => {
           el.remove();
           onDone();
         }, 450);
-      }, 2100);
+      }, 3000);
     }
   };
   spin();
@@ -304,20 +328,30 @@ export function showEventRoller(events, chosen, onDone) {
 }
 
 // ------------------------------------------------------------- results ----
-export function showResults({ event, standings, playerPos, bet, payout, style, onAgain, onLodge }) {
+export function showResults({ event, format, standings, playerPos, bet, payout, style, onAgain, onLodge }) {
   const el = document.createElement('div');
   el.id = 'results';
   const sfx = ['st', 'nd', 'rd', 'th', 'th'][playerPos - 1];
   const net = payout - bet;
+  // what the sheet was judged on
+  const mine = standings.find((r) => r.me)?.score;
+  let scoreLine = `<div class="style-line">Style points: ${fmt(style)}</div>`;
+  if (format && mine && format.scored === 'both') {
+    scoreLine = `<div class="score-line">Time ${fmt(mine.timePts)} + Style ${fmt(mine.style)} = <b>${fmt(mine.total)}</b></div>`;
+  } else if (format && mine && format.scored === 'style') {
+    scoreLine = `<div class="score-line">Judges' score <b>${fmt(mine.total)}</b>${mine.total <= 0 ? ' — no tricks landed' : ''}</div>`;
+  }
+  const judged = format && format.scored !== 'time';
   el.innerHTML = `
     <div class="panel results-card">
       <h2>${event ? `${event.flag} ${event.name}` : 'Race Complete'}</h2>
       ${event ? `<div class="ev-place-line">${event.place}</div>` : ''}
+      ${format ? `<div class="fmt-line">${format.name} &middot; ${format.tag}</div>` : ''}
       <div class="big-pos${playerPos <= 2 ? ' win' : ''}">${playerPos}${sfx}</div>
       <div class="payout-line${net < 0 ? ' loss' : ''}">
         Bet ${fmt(bet)} &rarr; paid <b>${fmt(payout)}</b> chips
       </div>
-      <div class="style-line">Style points: ${fmt(style)}</div>
+      ${scoreLine}
       <ul class="standings">
         ${standings
           .map(
@@ -325,6 +359,7 @@ export function showResults({ event, standings, playerPos, bet, payout, style, o
               <span class="p">${r.pos}${['st', 'nd', 'rd', 'th', 'th'][r.pos - 1]}</span>
               <span class="dot" style="background:#${r.color.toString(16).padStart(6, '0')}"></span>
               <span class="nm">${r.name}</span>
+              ${judged && r.score ? `<span class="sc">${fmt(r.score.total)}</span>` : ''}
               ${r.me ? `<span class="mult">&times;${r.mult}</span>` : ''}
             </li>`
           )

@@ -7,6 +7,7 @@ import { randomSeed } from './game/rng.js';
 import { needsTopUp, topUp, state } from './game/state.js';
 import { Quality } from './game/world.js';
 import { EVENTS } from './game/rtp.js';
+import { FORMATS, rollFormat, formatById } from './game/formats.js';
 import { showEventRoller } from './game/hud.js';
 import { loadCharacters } from './game/characters.js';
 import { loadProps } from './game/props.js';
@@ -36,13 +37,15 @@ function toMenu() {
   setScene(new MenuScene(seed, (opts) => rollThenRace(opts)));
 }
 
-/** Draw tonight's event, run the slot-machine reveal, then drop in. */
+/** Draw tonight's event and format, run the slot-machine reveal, then drop in. */
 const urlq = new URLSearchParams(location.search);
 function rollThenRace(opts) {
   const forced = EVENTS.find((e) => e.id === urlq.get('event'));
   const event = forced ?? EVENTS[Math.floor(Math.random() * EVENTS.length)];
-  if (forced) startRace({ ...opts, event }); // dev/photo mode skips the roller
-  else showEventRoller(EVENTS, event, () => startRace({ ...opts, event }));
+  const forcedFmt = formatById(urlq.get('format'));
+  const format = forcedFmt ?? rollFormat();
+  if (forced || forcedFmt) startRace({ ...opts, event, format }); // dev/photo mode skips the roller
+  else showEventRoller(EVENTS, event, FORMATS, format, () => startRace({ ...opts, event, format }));
 }
 
 function startRace(opts) {
