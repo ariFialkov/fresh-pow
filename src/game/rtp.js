@@ -57,7 +57,7 @@ export const EVENTS = [
   },
   {
     id: 'swiss', theme: 'swiss', nation: '🇨🇭', flag: '🇨🇭',
-    name: 'Silberhorn Super-G', place: 'Wallis, Switzerland',
+    name: 'Silberhorn Super‑G', place: 'Wallis, Switzerland',
     tag: 'Glacier ice and world-tour prestige',
     table: T([[1, 0.05, 10.0], [2, 0.12, 2.0], [3, 0.2, 0.82], [4, 0.28, 0.2], [5, 0.35, 0]]),
   },

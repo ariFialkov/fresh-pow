@@ -803,3 +803,7 @@ html, body {
   .lobby h3 { margin: 0; }
   .lobby ul { display: none; }
 }
+/* long venue names wrap on spaces only; the prize chip drops under on narrow cards */
+.ev-shot-foot { flex-wrap: wrap; }
+.ev-name { flex: 1 1 62%; overflow-wrap: normal; word-break: keep-all; }
+.ev-top { flex: none; }
