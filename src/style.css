@@ -516,3 +516,5 @@ html, body {
 #format-box { padding: 6px 10px; font-size: 10px; }
 #clock-box { padding: 6px 10px; }
 #clock-box .clk { font-size: 17px; }
+/* the field board lives in the left column now, under the clock */
+.hud-l #mini-board { position: static; margin-top: 2px; }

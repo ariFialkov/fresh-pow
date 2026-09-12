@@ -169,6 +169,7 @@ export class RaceHud {
           <div class="panel" id="rank-box">${solo ? '<div class="pos solo">SOLO</div><div class="of">run</div>' : '<div class="pos">–</div><div class="of">of 5</div>'}</div>
           <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
           <div class="panel" id="clock-box"${format && format.scored === 'style' ? ' style="display:none"' : ''}><div class="clk">0:00.00</div><div class="unit">time</div></div>
+          <div class="panel" id="mini-board"${solo ? ' style="display:none"' : ''}></div>
         </div>
         <div class="hud-r">
           <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
@@ -179,7 +180,6 @@ export class RaceHud {
         <div id="progress-bar"><div id="progress-fill"></div></div>
         <div class="plabel">to finish</div>
       </div>
-      <div class="panel" id="mini-board"${solo ? ' style="display:none"' : ''}></div>
       <div id="trick-toast"></div>
       <div id="stumble-flash"></div>
       <div class="controls-hint" id="controls-hint"></div>`;
