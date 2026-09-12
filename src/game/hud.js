@@ -167,6 +167,7 @@ export class RaceHud {
       <div class="race-top">
         <div class="panel" id="rank-box">${solo ? '<div class="pos solo">SOLO</div><div class="of">run</div>' : '<div class="pos">–</div><div class="of">of 5</div>'}</div>
         <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
+        <div class="panel" id="clock-box"${format && format.scored === 'style' ? ' style="display:none"' : ''}><div class="clk">0:00.00</div><div class="unit">time</div></div>
         <div class="panel" id="style-box"${judged ? '' : ' style="display:none"'}><div class="sty">0</div><div class="unit">style</div></div>
         <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
       </div>
@@ -204,7 +205,8 @@ export class RaceHud {
     if (text === '') c.classList.add('hidden');
   }
 
-  update({ rank, speed, progress, board, style = 0, solo = false }) {
+  update({ rank, speed, progress, board, style = 0, solo = false, clock = 0 }) {
+    this.el.querySelector('#clock-box .clk').textContent = fmtTime(Math.max(0, clock));
     const sfx = ['st', 'nd', 'rd', 'th', 'th'][rank - 1] || 'th';
     if (!solo) this.el.querySelector('#rank-box .pos').innerHTML = `${rank}<small>${sfx}</small>`;
     this.el.querySelector('#speed-box .spd').textContent = Math.round(speed * 3.6);

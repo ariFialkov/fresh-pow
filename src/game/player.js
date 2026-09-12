@@ -55,6 +55,7 @@ export class Player {
     this.style = 0; // banked: only what was landed
     this.pending = 0; // this jump's tricks — paid on a stomped landing, lost on a crash
     this._pipeReturn = 0; // after a pipe pop: which way is back into the pipe
+    this._boostT = 0; // seconds of slipstream left after threading a boost gate
 
     // keep a handle on our swipe hook: the input is shared across scenes and
     // a dying race must only unhook itself, never the race replacing it
@@ -117,6 +118,8 @@ export class Player {
 
     const stumbling = this.stumbleT > 0 || this.knockT > 0;
     if (this.stumbleT > 0) this.stumbleT -= dt;
+    if (this._boostT > 0) this._boostT -= dt;
+    const prevS = this.progress;
     this.landComp = Math.max(0, this.landComp - dt * 2.6);
 
     // ---- steering: three distinct feels ----
@@ -185,7 +188,8 @@ export class Player {
       // right before a grind rail the brake sets the sideways stance
       // without washing off the momentum you need to carry onto the log
       const railApproach = braking && t.nearGrindEntry(this.pos.x, -this.pos.z);
-      const k = DRAG_K * (tucking ? TUCK_DRAG : 1) * (braking ? (railApproach ? 1.4 : 4) : 1);
+      // a boost gate's kick lingers as a stretch of near-drag-free running
+      const k = DRAG_K * (tucking ? TUCK_DRAG : 1) * (braking ? (railApproach ? 1.4 : 4) : 1) * (this._boostT > 0 ? 0.35 : 1);
       a -= k * this.speed * this.speed;
       if (braking) a -= BRAKE_DECEL * (railApproach ? 0.18 : 1);
       if (stumbling) a -= 6;
@@ -321,6 +325,16 @@ export class Player {
       }
 
       if (!this.airborne) this._collide();
+      // threading a boost gate: a kick now, slipstream for a moment after
+      if (!this.airborne && !stumbling) {
+        const g = t.boostGateAt(this.pos.x, prevS, this.progress);
+        if (g) {
+          this.speed = Math.min(this.speed + 7, 46);
+          this._boostT = 1.6;
+          if (this.hud) this.hud.trickToast('BOOST!', 'gate threaded');
+          if (this.fx) this.fx.burst(this.pos, dir, { count: 60, speed: 5, up: 2, spread: 1.2, size: 0.24 });
+        }
+      }
       }
     } else {
       // ---- air ----

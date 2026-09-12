@@ -27,6 +27,7 @@ const course = () => page.evaluate(() => {
     drops: t.drops.length, bridges: t.bridges.length, ledges: t.ledges.length, logs: t.logs.length,
     animals: r.animals.events.length,
     solo: r.solo, botsOnCourse: r.bots.filter((b) => b.obj.parent).length,
+    gates: t.boostGates.map((g) => Math.round(g.s)), clockBox: getComputedStyle(document.querySelector('#clock-box')).display,
     rankBox: document.querySelector('#rank-box .pos')?.textContent, miniBoard: getComputedStyle(document.querySelector('#mini-board')).display,
     badge: document.querySelector('#format-box')?.textContent,
     styleBox: getComputedStyle(document.querySelector('#style-box')).display,
@@ -94,6 +95,46 @@ for (const f of list) {
       return rec;
     });
     console.log('big air flight:', JSON.stringify(air));
+  }
+  // thread the first boost gate and measure the kick
+  const boost = await page.evaluate(async () => {
+    const r = window.__fp.race;
+    const t = r.terrain;
+    const g = t.boostGates[0];
+    if (!g) return null;
+    const P = r.player;
+    P.pos.set(g.x, t.groundAt(g.x, -(g.s - 12)), -(g.s - 12));
+    P.speed = 14; P.airborne = false; P.stumbleT = 0; P.yaw = P.travelYaw = 0;
+    const rec = { before: 14, after: null, boostT: 0 };
+    const orig = r.update.bind(r);
+    r.update = (dt) => {
+      orig(dt);
+      if (!P.airborne) P.yaw = P.travelYaw = 0;
+      if (rec.after == null && P.progress > g.s + 0.5) { rec.after = +P.speed.toFixed(1); rec.boostT = +P._boostT.toFixed(2); }
+    };
+    const t0 = performance.now();
+    while (performance.now() - t0 < 20000 && rec.after == null) await new Promise((k) => requestAnimationFrame(k));
+    r.update = orig;
+    return rec;
+  });
+  console.log('boost gate:', JSON.stringify(boost));
+  if (f === 'glade') {
+    // a look down the lane through the trees
+    await page.evaluate(() => {
+      const r = window.__fp.race;
+      const t = r.terrain;
+      const g = t.glades[0];
+      const s = g.s0 + 120;
+      const x = t.centerAt(s) + g.side * 55 * 0.45;
+      r.update = () => {
+        r.camera.position.set(x, t.heightAt(x, -s) + 14, -(s - 30));
+        r.camera.lookAt(x, t.heightAt(x, -(s + 40)), -(s + 40));
+      };
+    });
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: 'scratch-glade.png' });
+    console.log('glade shot');
+    await load(f);
   }
   const s1 = await settle(f === 'race' ? 0 : 420);
   console.log('settled(420):', JSON.stringify({ playerPos: s1.playerPos, line: s1.line, fmtLine: s1.fmtLine, rows: s1.rows, ordered: s1.rows[0].score == null || ordered(s1.rows) }));

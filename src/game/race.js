@@ -99,6 +99,8 @@ export class RaceScene {
     });
 
     this.time = 0;
+    this.goTime = null; // race clock zero: the moment the gates open
+    this.playerClock = null; // stopped at the line
     this.playerStallTime = 0;
     this.playerKnocks = 0; // times the player has been flattened (capped)
     this.stateName = 'countdown';
@@ -141,6 +143,7 @@ export class RaceScene {
         this.hud.countdown('GO!');
         setTimeout(() => this.hud.countdown(''), 800);
         this.stateName = 'racing';
+        this.goTime = this.time;
         this.player.frozen = false;
         if (!this.solo) for (const b of this.bots) b.frozen = false;
         this.gate.setPhase('go'); // lights green, bars fly, pyro + smoke
@@ -184,6 +187,7 @@ export class RaceScene {
       // player crosses the line
       if (!this.player.finished && this.player.progress >= this.terrain.length) {
         this.player.finished = true;
+        this.playerClock = this.time - this.goTime;
         this.finishOrder.push({ name: 'You', color: 0xfbbf24, me: true });
         this._firstCross();
         this.stateName = 'done';
@@ -214,6 +218,7 @@ export class RaceScene {
       board: live,
       style: this.player.style,
       solo: this.solo,
+      clock: this.goTime == null ? 0 : this.playerClock ?? this.time - this.goTime,
     });
 
     // neon FINISH signage: a lazy celebratory pulse that goes frantic once
@@ -342,8 +347,8 @@ export class RaceScene {
     const scores = settleScores(this.format, {
       playerPos,
       playerStyle: this.player.style,
-      playerTime: this.time,
-      bots: this.bots.map((b) => ({ rank: b.rank, time: this.solo ? null : b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed) })),
+      playerTime: this.playerClock ?? this.time - this.goTime,
+      bots: this.bots.map((b) => ({ rank: b.rank, time: this.solo ? null : (b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed)) - this.goTime })),
       rng: mulberry32(this.terrain.seed ^ 0x5c0e),
     });
     for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.rank).style;

@@ -254,16 +254,22 @@ export class Terrain {
       }
     }
     for (const g of this.glades) {
-      for (let ts = g.s0; ts < g.s1; ts += 5.5) {
-        // the cleared path snakes between the run edge and the glade's
-        // inner fringe
-        const pathU = 1 - g.depth * (0.5 + 0.38 * Math.sin((ts - g.s0) * g.pathFreq + g.pathPh));
+      // the cleared lane winds on two scales — a long swing and a quicker
+      // wriggle riding on it — and breathes in width, so it reads like a
+      // real line through the woods rather than a slot between columns
+      const lane = (ts) => {
+        const a = (ts - g.s0) * g.pathFreq + g.pathPh;
+        return 1 - g.depth * (0.5 + 0.3 * Math.sin(a) + 0.17 * Math.sin(a * 2.7 + 1.3));
+      };
+      for (let ts = g.s0; ts < g.s1; ts += 4.2) {
+        const pathU = lane(ts);
+        const laneHalf = 0.065 + 0.02 * Math.sin(ts * 0.05 + g.pathPh);
+        // trunks scatter anywhere across the wood, never in rows
         for (let r = 0; r < 5; r++) {
-          if (rng() < 0.1) continue; // stray gaps beyond the main line
-          const u = 1.0 - g.depth * (r / 4) - rng() * 0.05;
-          if (Math.abs(u - pathU) < 0.055) continue; // keep the path clear
-          const tx = this.centerAt(ts) + g.side * COURSE.halfWidth * u + (rng() - 0.5) * 2.5;
-          const tsJ = ts + (rng() - 0.5) * 4;
+          const u = 1.02 - g.depth * rng() * 1.04;
+          if (Math.abs(u - pathU) < laneHalf) continue; // keep the lane clear
+          const tx = this.centerAt(ts) + g.side * COURSE.halfWidth * u + (rng() - 0.5) * 3;
+          const tsJ = ts + (rng() - 0.5) * 4.2;
           if (onLedgeFace(tx, tsJ)) continue;
           addTree(tx, tsJ, u < 1.0);
         }
@@ -343,7 +349,34 @@ export class Terrain {
       this.grindLogs.push({ x: gx, s0, ax: Math.sin(yaw), az: Math.cos(yaw), sc, len, topY, bumpH: 0.9 });
     }
 
-    // 7) massive hollow logs laid down the fall line — ride straight through
+    // 7) boost gates: two flags in parallel with a lit line between them —
+    // thread the pair for a kick of speed. Placed on the racing line in the
+    // races, three up the Big Air in-run, spaced down the middle of the pipe
+    this.boostGates = [];
+    if (format === 'bigair') {
+      const j = this.jumps[0];
+      for (const d of [150, 110, 70]) this.boostGates.push({ s: j.s - d, x: this.centerAt(j.s - d), w: 2.2 });
+    } else if (format === 'halfpipe') {
+      const p = this.pipes[0];
+      for (const gs of [190, 260, 330]) this.boostGates.push({ s: gs, x: this.centerAt(gs) + p.off, w: 2.2 });
+    } else if (format !== 'glade') {
+      let gs = 260 + rng() * 120;
+      while (gs < this.length - 200) {
+        if (!nearJump(gs) && !nearBridge(gs) && !nearPipe(gs) && !this.drops.some((d) => Math.abs(d.s - gs) < 50)) {
+          const x = this.centerAt(gs) + (rng() - 0.5) * 16;
+          if (!onLedgeFace(x, gs)) this.boostGates.push({ s: gs, x, w: 2.2 });
+        }
+        gs += 200 + rng() * 140;
+      }
+    }
+    // keep the gates themselves clear of scatter
+    const inGate = (px, ps) => this.boostGates.some((g) => Math.abs(ps - g.s) < 5 && Math.abs(px - g.x) < g.w + 2);
+    this.obstacles = this.obstacles.filter((o) => !inGate(o.x, -o.z));
+    for (const list of [treeXf, rockXf]) {
+      for (let j = list.length - 1; j >= 0; j--) if (inGate(list[j].x, -list[j].z)) list.splice(j, 1);
+    }
+
+    // 8) massive hollow logs laid down the fall line — ride straight through
     // the bore. Sited off the finished surface: the trunk is seated on a
     // straight line between its two ends, so a site is only kept when the
     // ground along the bore stays close to that line — no dip to fall
@@ -652,6 +685,14 @@ export class Terrain {
    * Normal of the surface riders stand on (see groundAt) — the snow's slope
    * would pitch a board nose-down through the shallower start ramp.
    */
+  /** The boost gate a rider threads moving from s0 to s1 at x, if any. */
+  boostGateAt(x, s0, s1) {
+    for (const g of this.boostGates) {
+      if (g.s > s0 && g.s <= s1 && Math.abs(x - g.x) < g.w) return g;
+    }
+    return null;
+  }
+
   /** How hard a takeoff may throw the rider up: the Big Air lip sends it. */
   launchCapAt(s) {
     for (const j of this.jumps) if (j.big && Math.abs(s - j.s) < 25) return 15;
@@ -1016,6 +1057,38 @@ export class Terrain {
       }
     });
     group.add(poles, redFlags, blueFlags);
+
+    // boost gates: paired flags in the event's accent with a lit line between
+    if (this.boostGates.length) {
+      const bg = this.boostGates;
+      const upV = new THREE.Vector3(0, 1, 0);
+      const accent = new THREE.Color(this.theme.eventB ?? 0xf5d76e);
+      const gFlagMat = new THREE.MeshLambertMaterial({ color: accent, emissive: accent.clone().multiplyScalar(0.4), side: THREE.DoubleSide });
+      const gPoles = new THREE.InstancedMesh(poleGeo, poleMat, bg.length * 2);
+      const gFlags = new THREE.InstancedMesh(flagGeo, gFlagMat, bg.length * 2);
+      const lineGeo = new THREE.PlaneGeometry(1, 1);
+      lineGeo.rotateX(-Math.PI / 2);
+      const lineMat = new THREE.MeshBasicMaterial({
+        color: accent, transparent: true, opacity: 0.6, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      });
+      const lines = new THREE.InstancedMesh(lineGeo, lineMat, bg.length);
+      bg.forEach((g, i) => {
+        for (const [k, side] of [[0, -1], [1, 1]]) {
+          const x = g.x + side * g.w;
+          const z = -g.s;
+          const pos = new THREE.Vector3(x, this.heightAt(x, z), z);
+          m.compose(pos, q.identity(), sc.set(1, 1, 1));
+          gPoles.setMatrixAt(i * 2 + k, m);
+          m.compose(pos, q.setFromAxisAngle(upV, side < 0 ? Math.PI : 0), sc.set(1, 1, 1)); // flags fly outward
+          gFlags.setMatrixAt(i * 2 + k, m);
+        }
+        q.setFromUnitVectors(upV, this.normalAt(g.x, -g.s));
+        m.compose(new THREE.Vector3(g.x, this.heightAt(g.x, -g.s) + 0.05, -g.s), q, sc.set(g.w * 2 - 0.4, 1, 1.2));
+        lines.setMatrixAt(i, m);
+      });
+      group.add(gPoles, gFlags, lines);
+    }
   }
 
   _buildGatesAndFinish(group) {
