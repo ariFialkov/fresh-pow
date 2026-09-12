@@ -281,12 +281,12 @@ export class Player {
           this.vy += 4.2;
           if (this.hud) this.hud.trickToast('POP!', 'off the lip');
         }
-        // turn the outward run back toward the middle so the arc comes down
-        // inside the pipe, never out over the deck; keep the downhill run
-        const out = Math.sign(pp.q);
-        let vx = dir.x * this.speed;
+        // straight up and straight back down: all the across-pipe run goes
+        // into the pop, so the arc lands on the wall at the same x it left
+        // from and the ride carries back around the transition. Only the
+        // downhill run is kept.
+        const vx = 0;
         const vz = dir.z * this.speed;
-        if (vx * out > 0) vx = -vx * 0.35;
         this.speed = Math.hypot(vx, vz);
         this.travelYaw = Math.atan2(vx, -vz);
         this.pos.set(nx, this.pos.y + this.vy * dt, nz);
@@ -578,7 +578,7 @@ export class Player {
 
     // align to slope when grounded, trick rotations when flying
     if (!this.airborne) {
-      const n = t.normalAt(this.pos.x, this.pos.z);
+      const n = t.groundNormalAt(this.pos.x, this.pos.z);
       const pitch = Math.atan2(-n.z, n.y) * 0.85;
       this.rider.rig.rotation.x = lerp(this.rider.rig.rotation.x % (Math.PI * 2), -pitch, clamp(dt * 8, 0, 1));
       this.rider.rig.rotation.y = 0;

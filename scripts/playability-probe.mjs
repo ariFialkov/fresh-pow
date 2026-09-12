@@ -3,7 +3,7 @@
 // and a screenshot of the bridge log resting in its banks.
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
-const server = await createServer({ server: { port: 4267, strictPort: true } });
+const server = await createServer({ server: { port: 4287, strictPort: true } });
 await server.listen();
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
@@ -14,12 +14,13 @@ const startRace = async () => {
   await page.evaluate(() => document.querySelector('#start-btn').click());
   await page.waitForFunction(() => window.__fp?.race?.stateName === 'racing', undefined, { timeout: 120000 });
 };
-await page.goto('http://localhost:4267/?event=vermont');
+await page.goto('http://localhost:4287/?event=vermont');
 await startRace();
 
 // 1) ramp: sample the surface the rider stands on vs. the raw snow from the
 // rider line to past the lip
-const ramp = await page.evaluate(() => {
+const ramp = await page.evaluate(async () => {
+  const THREE = await import('/node_modules/three/build/three.module.js');
   const r = window.__fp.race;
   const t = r.terrain;
   const g = r.gate;
@@ -30,7 +31,27 @@ const ramp = await page.evaluate(() => {
     const z = z0 - d;
     rows.push({ dz: d, ramp: +(t.surface(x, z)).toFixed(2), snow: +t.heightAt(x, z).toFixed(2), stand: +t.groundAt(x, z).toFixed(2) });
   }
-  return { hideZ: +g.hideZ.toFixed(2), z0: +z0.toFixed(2), rows };
+  // the board must pitch to the ramp, not the steeper snow beneath it
+  const deg = (n) => +((Math.atan2(-n.z, n.y) * 180) / Math.PI).toFixed(1);
+  const zr = z0 - 0.7;
+  const tilt = { onRamp: deg(t.groundNormalAt(x, zr)), snowUnder: deg(t.normalAt(x, zr)) };
+  // ground truth: the drawn pavilion's top face above the lane, against the
+  // height the rider actually stands on (+ = rider stands under the mesh)
+  const meshGap = [];
+  {
+    const rc = new THREE.Raycaster();
+    const meshes = [];
+    g.pav.traverse((o) => o.isMesh && meshes.push(o));
+    for (const m of meshes) m.material = Object.assign(m.material.clone(), { side: THREE.DoubleSide });
+    for (let d = -0.5; d <= 1.5; d += 0.25) {
+      const z = z0 - d;
+      rc.set(new THREE.Vector3(x, t.groundAt(x, z) + 3, z), new THREE.Vector3(0, -1, 0));
+      const hits = rc.intersectObjects(meshes, true).filter((h) => h.distance < 6);
+      const top = hits.length ? t.groundAt(x, z) + 3 - hits[0].distance : null;
+      meshGap.push({ dz: d, meshTop: top == null ? null : +top.toFixed(2), stand: +t.groundAt(x, z).toFixed(2), gap: top == null ? null : +(top - t.groundAt(x, z)).toFixed(2) });
+    }
+  }
+  return { hideZ: +g.hideZ.toFixed(2), z0: +z0.toFixed(2), rows, tilt, meshGap };
 });
 console.log('ramp:', JSON.stringify(ramp));
 

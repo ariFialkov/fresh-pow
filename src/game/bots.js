@@ -215,7 +215,7 @@ export class Bot {
     const lean = clamp(this.speed * this.speed * curv * 0.09, -1, 1);
 
     if (!airborne) {
-      const n = this.terrain.normalAt(x, z);
+      const n = this.terrain.groundNormalAt(x, z);
       this.rider.rig.rotation.x = Math.atan2(-n.z, n.y) * -0.85;
     }
 

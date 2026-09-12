@@ -77,33 +77,42 @@ let fpsN = 0;
 let fpsTimer = 0;
 
 const clock = new THREE.Clock();
+let sinceScale = 1e9; // seconds since the render scale last moved
 renderer.setAnimationLoop(() => {
   const rawDt = clock.getDelta();
   const dt = Math.min(rawDt, 0.05);
-  if (current) {
-    current.update(dt);
-    renderer.render(current.scene, current.camera);
-  }
 
+  // Resolution changes happen BEFORE this frame renders: resizing the
+  // drawing buffer clears it, and a resize after render() leaves that
+  // empty buffer on screen for a frame — a black flash. Hysteresis keeps a
+  // scene that sits near a threshold from flip-flopping every window.
   fpsAcc += rawDt;
   fpsN++;
   fpsTimer += rawDt;
+  sinceScale += rawDt;
   if (fpsTimer > 3 && fpsN > 10) {
     const fps = fpsN / fpsAcc;
+    let next = dprScale;
     if (fps < 42 && Quality.shadows) {
       // shadows are the first thing to go on a struggling device
       Quality.shadows = false;
       if (current?.sun) current.sun.castShadow = false;
-    } else if (fps < 42 && dprScale > 0.55) dprScale = Math.max(0.55, dprScale - 0.15);
-    else if (fps > 56 && dprScale < 1) dprScale = Math.min(1, dprScale + 0.1);
-    const target = MAX_DPR * dprScale;
-    if (Math.abs(renderer.getPixelRatio() - target) > 0.01) {
-      renderer.setPixelRatio(target);
+    } else if (fps < 40 && dprScale > 0.55 && sinceScale > 6) next = Math.max(0.55, dprScale - 0.15);
+    else if (fps > 58 && dprScale < 1 && sinceScale > 20) next = Math.min(1, dprScale + 0.1);
+    if (next !== dprScale) {
+      dprScale = next;
+      sinceScale = 0;
+      renderer.setPixelRatio(MAX_DPR * dprScale);
       renderer.setSize(innerWidth, innerHeight);
     }
     fpsAcc = 0;
     fpsN = 0;
     fpsTimer = 0;
+  }
+
+  if (current) {
+    current.update(dt);
+    renderer.render(current.scene, current.camera);
   }
 });
 

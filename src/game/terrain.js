@@ -607,6 +607,17 @@ export class Terrain {
   }
 
   /**
+   * Normal of the surface riders stand on (see groundAt) — the snow's slope
+   * would pitch a board nose-down through the shallower start ramp.
+   */
+  groundNormalAt(x, z, out = new THREE.Vector3()) {
+    const e = 0.6;
+    const dx = this.groundAt(x + e, z) - this.groundAt(x - e, z);
+    const dz = this.groundAt(x, z + e) - this.groundAt(x, z - e);
+    return out.set(-dx, 2 * e, -dz).normalize();
+  }
+
+  /**
    * Grind rail lookup: the point (x, s) projected onto a rail within reach,
    * or null. Returns the snapped position on the rail axis, the rail's top
    * height and its heading.

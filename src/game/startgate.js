@@ -8,12 +8,13 @@ import { createProp, propPalette } from './props.js';
 // pavilion model facts (normalized units, width 100, base y=0):
 // front bay dividers at x ±9/±25/±43.5 -> bay centers 0/±17/±34.3, so a
 // uniform x-scale of 6.5/17 lands the bays on the 6.5 m lane grid; each bay
-// has a ramp sloping from y 7.4 (z 8) down to y 1.4 (z 28) at its mouth.
+// has a ramp whose walkable face (measured off the mesh, scripts/ramp-measure)
+// runs from y 8.58 at z 8 down to y 1.38 at its mouth, z 28.
 const PAV_SX = 6.5 / 17;
 const PAV_SY = 0.15;
 const PAV_SZ = 0.185;
 const PAV_FRONT = 28.7; // front edge z in model units
-const rampY = (zn) => 7.4 - 6 * (THREE.MathUtils.clamp(zn, 8, 28) - 8) / 20;
+const rampY = (zn) => 8.58 - 0.36 * (THREE.MathUtils.clamp(zn, 8, 28) - 8);
 // the ramp meets the snow at the rider line and its lip sits 1.45 m downhill,
 // this much lower — the terrain banks its snow up to that lip so riders roll
 // off the ramp instead of dropping off it
