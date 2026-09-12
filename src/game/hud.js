@@ -165,11 +165,15 @@ export class RaceHud {
     el.innerHTML = `
       <div id="countdown" class="hidden"></div>
       <div class="race-top">
-        <div class="panel" id="rank-box">${solo ? '<div class="pos solo">SOLO</div><div class="of">run</div>' : '<div class="pos">–</div><div class="of">of 5</div>'}</div>
-        <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
-        <div class="panel" id="clock-box"${format && format.scored === 'style' ? ' style="display:none"' : ''}><div class="clk">0:00.00</div><div class="unit">time</div></div>
-        <div class="panel" id="style-box"${judged ? '' : ' style="display:none"'}><div class="sty">0</div><div class="unit">style</div></div>
-        <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
+        <div class="hud-l">
+          <div class="panel" id="rank-box">${solo ? '<div class="pos solo">SOLO</div><div class="of">run</div>' : '<div class="pos">–</div><div class="of">of 5</div>'}</div>
+          <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
+          <div class="panel" id="clock-box"${format && format.scored === 'style' ? ' style="display:none"' : ''}><div class="clk">0:00.00</div><div class="unit">time</div></div>
+        </div>
+        <div class="hud-r">
+          <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
+          <div class="panel" id="style-box"${judged ? '' : ' style="display:none"'}><div class="sty">0</div><div class="unit">style</div></div>
+        </div>
       </div>
       <div class="panel" id="progress-wrap">
         <div id="progress-bar"><div id="progress-fill"></div></div>

@@ -362,11 +362,14 @@ export class Terrain {
     } else if (format !== 'glade') {
       let gs = 260 + rng() * 120;
       while (gs < this.length - 200) {
-        if (!nearJump(gs) && !nearBridge(gs) && !nearPipe(gs) && !this.drops.some((d) => Math.abs(d.s - gs) < 50)) {
-          const x = this.centerAt(gs) + (rng() - 0.5) * 16;
-          if (!onLedgeFace(x, gs)) this.boostGates.push({ s: gs, x, w: 2.2 });
+        const clear = !nearJump(gs) && !nearBridge(gs) && !nearPipe(gs) && !this.drops.some((d) => Math.abs(d.s - gs) < 50);
+        const x = this.centerAt(gs) + (rng() - 0.5) * 16;
+        if (clear && !onLedgeFace(x, gs)) {
+          this.boostGates.push({ s: gs, x, w: 2.2 });
+          gs += 200 + rng() * 140;
+        } else {
+          gs += 45; // blocked by a feature — try again just below it
         }
-        gs += 200 + rng() * 140;
       }
     }
     // keep the gates themselves clear of scatter
