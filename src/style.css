@@ -518,3 +518,4 @@ html, body {
 #clock-box .clk { font-size: 17px; }
 /* the field board lives in the left column now, under the clock */
 .hud-l #mini-board { position: static; margin-top: 2px; }
+.hud-l #format-box { align-self: flex-start; }
