@@ -138,15 +138,16 @@ export async function loadCharacters() {
 }
 
 /** Seeded wardrobe: jacket = identity color, the rest drawn from the pools. */
-export function makePalette(jacketColor, seed) {
+export function makePalette(jacketColor, seed, outfit = null) {
   const rng = mulberry32(seed >>> 0);
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  // a chosen outfit dresses the garments; skin and hair stay the rider's own
   return {
-    jacket: jacketColor,
-    jacket2: pick(POOL.jacket2),
-    pants: pick(POOL.pants),
-    hat: pick(POOL.hat),
-    accessory: pick(POOL.accessory),
+    jacket: outfit?.jacket ?? jacketColor,
+    jacket2: outfit?.jacket2 ?? pick(POOL.jacket2),
+    pants: outfit?.pants ?? pick(POOL.pants),
+    hat: outfit?.hat ?? pick(POOL.hat),
+    accessory: outfit?.accessory ?? pick(POOL.accessory),
     skin: pick(POOL.skin),
     hair: pick(POOL.hair),
   };
@@ -202,11 +203,11 @@ const BONE_NAMES = {
  * Clones a character, applies its variant texture, and precomputes the
  * retargeting data (rest orientations + rig-space rotation axes per bone).
  */
-export function createCharacter(type, jacketColor, seed) {
+export function createCharacter(type, jacketColor, seed, outfit = null) {
   const modelId = TYPE_TO_MODEL[type] ?? 'boarder';
   const asset = ASSETS[modelId];
   const root = cloneSkeleton(asset.gltf.scene);
-  const palette = makePalette(jacketColor, seed);
+  const palette = makePalette(jacketColor, seed, outfit);
 
   let mesh = null;
   root.traverse((o) => {

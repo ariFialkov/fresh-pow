@@ -14,7 +14,7 @@ function load() {
   } catch {
     /* corrupted or unavailable storage -> fresh save */
   }
-  return { balance: START_BALANCE, gearId: 'board-midnight', bet: 25, name: 'You' };
+  return { balance: START_BALANCE, gearId: 'board-midnight', outfitId: 'fit-classic', owned: [], bet: 25, name: 'You' };
 }
 
 export const state = load();

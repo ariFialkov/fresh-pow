@@ -64,7 +64,7 @@ export class RaceScene {
     const laneNames = [null, null, 'You', null, null];
     for (const b of opts.bots) laneNames[b.lane] = b.identity.name;
     this.gate.setRoster(laneNames);
-    this.player = new Player(this.terrain, opts.gear, input, this.hud);
+    this.player = new Player(this.terrain, opts.gear, input, this.hud, opts.outfit ?? null);
     this.player.fx = this.fx;
     const playerLane = this.terrain.gateLanes[2];
     this.player.placeAt(playerLane.x, playerLane.z);

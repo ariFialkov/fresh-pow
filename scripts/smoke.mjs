@@ -26,8 +26,14 @@ await page.waitForFunction(() => {
 }, undefined, { timeout: 120000 });
 console.log('lobby full, start armed');
 
-// cycle gear a few times (exercises all three ride builders)
-for (let i = 0; i < 5; i++) await page.click('#gear-next');
+// switch through the three ride types (exercises all three ride builders;
+// each tab lands on an owned ride, so the start button stays armed)
+for (const t of ['ski', 'sled', 'board']) {
+  await page.click(`.ttab[data-type="${t}"]`);
+  await page.waitForTimeout(150);
+}
+await page.click('#fit-next');
+await page.click('#fit-prev');
 await page.click('.chip'); // pick first bet chip
 if (shots) await page.screenshot({ path: 'scratch-menu.png' });
 

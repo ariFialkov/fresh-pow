@@ -141,7 +141,7 @@ function buildGear(gear) {
 }
 
 // ---------------------------------------------------------------- rider ----
-export function createRider(gear, helmetColor) {
+export function createRider(gear, helmetColor, outfit = null) {
   const root = new THREE.Group();
   const rig = new THREE.Group();
   root.add(rig);
@@ -161,7 +161,7 @@ export function createRider(gear, helmetColor) {
   // ---- rigged character (uploaded model), reskinned per instance ----
   let seed = helmetColor >>> 0;
   for (const ch of gear.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-  const char = createCharacter(gear.type, helmetColor, seed);
+  const char = createCharacter(gear.type, helmetColor, seed, outfit);
   const wrapper = new THREE.Group();
   wrapper.rotation.y = Math.PI; // model faces +z; the rig faces -z
   wrapper.scale.setScalar(MODEL_SCALE);

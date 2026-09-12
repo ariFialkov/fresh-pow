@@ -17,11 +17,11 @@ const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
 
 export class Player {
-  constructor(terrain, gear, input, hud) {
+  constructor(terrain, gear, input, hud, outfit = null) {
     this.terrain = terrain;
     this.input = input;
     this.hud = hud;
-    this.rider = createRider(gear, 0xfbbf24);
+    this.rider = createRider(gear, 0xfbbf24, outfit);
     this.obj = this.rider.root;
 
     this.isSled = gear.type === 'sled';

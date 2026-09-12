@@ -56,7 +56,7 @@ function startRace(opts) {
           // quick re-race: same bet and gear, fresh mountain, roster and event
           if (needsTopUp()) topUp();
           const seed = randomSeed();
-          rollThenRace({ seed, bet: opts.bet, gear: opts.gear, bots: rosterFor(seed) });
+          rollThenRace({ seed, bet: opts.bet, gear: opts.gear, outfit: opts.outfit, bots: rosterFor(seed) });
         } else {
           toMenu();
         }
