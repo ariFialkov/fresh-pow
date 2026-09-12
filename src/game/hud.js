@@ -517,16 +517,18 @@ export function showEventRoller(events, chosen, formats, format, onDone) {
         if (fd < 300) setTimeout(fspin, fd);
         else {
           fmtEl.innerHTML = formatLine(format, 'fmt-locked') + statChips(format);
+          // hold the locked card, then out — timed from the format lock, so a
+          // slow device that stretches the reels still shows the result
+          setTimeout(() => {
+            el.classList.add('ev-out');
+            setTimeout(() => {
+              el.remove();
+              onDone();
+            }, 450);
+          }, 2600);
         }
       };
       fspin();
-      setTimeout(() => {
-        el.classList.add('ev-out');
-        setTimeout(() => {
-          el.remove();
-          onDone();
-        }, 450);
-      }, 3200);
     }
   };
   spin();

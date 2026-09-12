@@ -38,7 +38,7 @@ export class MenuScene {
     this.onStart = onStart;
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0xdcefff, 220, 1100);
-    this.camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 4000);
+    this.camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 4000);
 
     this.terrain = new Terrain(seed);
     const tg = new THREE.Group();
@@ -224,14 +224,15 @@ export class MenuScene {
     // high enough to look down at them, the start house rising behind
     const h = this.hero;
     const a = Math.sin(this.t * 0.22) * 0.75;
-    const R = 4.6;
+    const R = 4.4;
     const cx = h.x + Math.sin(a) * R;
     const cz = h.z - Math.cos(a) * R;
-    // chest height, a touch above: the rider fills the upper frame with the
-    // start house and the sky behind instead of a wall of snow
-    const cy = Math.max(h.y + 1.75 + Math.sin(this.t * 0.31) * 0.2, this.terrain.groundAt(cx, cz) + 1.2);
+    // low and tilted up: on this grade a chest-high camera only sees snow
+    // behind the rider, but from knee height the gate booths and the start
+    // house rise into the frame behind them
+    const cy = Math.max(h.y + 0.95 + Math.sin(this.t * 0.31) * 0.12, this.terrain.groundAt(cx, cz) + 0.7);
     this.camera.position.set(cx, cy, cz);
-    this.camera.lookAt(h.x, h.y + 1.25, h.z);
+    this.camera.lookAt(h.x, h.y + 1.35, h.z);
 
     this.gate.update(dt, this.t, this.fx, null, this.camera.position.z);
     this.fx.update(dt);
