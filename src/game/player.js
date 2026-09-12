@@ -52,7 +52,9 @@ export class Player {
     this.spinDone = 0;
     this.flipDone = 0;
     this.combo = [];
-    this.style = 0;
+    this.style = 0; // banked: only what was landed
+    this.pending = 0; // this jump's tricks — paid on a stomped landing, lost on a crash
+    this._pipeReturn = 0; // after a pipe pop: which way is back into the pipe
 
     // keep a handle on our swipe hook: the input is shared across scenes and
     // a dying race must only unhook itself, never the race replacing it
@@ -76,8 +78,9 @@ export class Player {
     else if (dir === 'up') this.trickFlip -= Math.PI * 2;
     else this.trickFlip += Math.PI * 2;
     this.combo.push(TRICK_NAMES[dir]);
-    this.style += 100 * this.combo.length; // combos build multipliers
-    if (this.hud) this.hud.trickToast(this.combo.join(' + '), `+${100 * this.combo.length} style`);
+    // combos build multipliers — but nothing counts until the landing sticks
+    this.pending += 100 * this.combo.length;
+    if (this.hud) this.hud.trickToast(this.combo.join(' + '), `${this.pending} riding on the landing`);
   }
 
   update(dt) {
@@ -291,6 +294,7 @@ export class Player {
         // downhill run is kept.
         const vx = 0;
         const vz = dir.z * this.speed;
+        this._pipeReturn = -Math.sign(pp.q); // land turned back into the pipe
         this.speed = Math.hypot(vx, vz);
         this.travelYaw = Math.atan2(vx, -vz);
         this.pos.set(nx, this.pos.y + this.vy * dt, nz);
@@ -372,16 +376,27 @@ export class Player {
           });
         }
         if (sloppy) {
-          this.stumble('crashed the landing');
-          this.style = Math.max(0, this.style - 150);
+          // the crash takes every point this jump was worth, landed tricks
+          // included — the run only counts what you ride away from
+          this.stumble(this.pending > 0 ? `crashed the landing — lost ${this.pending}` : 'crashed the landing');
+          this.pending = 0;
         } else if (this.combo.length) {
           this.speed += 1.5; // clean landing keeps momentum
-          if (this.hud) this.hud.trickToast('STOMPED IT', this.combo.join(' + '));
+          this.style += this.pending;
+          if (this.hud) this.hud.trickToast(`STOMPED IT  +${this.pending}`, this.combo.join(' + '));
+          this.pending = 0;
         }
+        this.pending = 0;
         this.trickSpin = this.spinDone = 0;
         this.trickFlip = this.flipDone = 0;
         this.combo = [];
         this.vy = 0;
+        // off a pipe wall: land turned square across the pipe, facing the
+        // middle, so the run carries back through the transition
+        if (this._pipeReturn) {
+          this.yaw = this.travelYaw = this._pipeReturn * 1.1;
+          this._pipeReturn = 0;
+        }
       } else {
         this.pos.set(nx, ny, nz);
       }

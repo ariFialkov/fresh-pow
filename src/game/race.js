@@ -27,6 +27,9 @@ export class RaceScene {
     this.input = input;
     this.event = opts.event ?? EVENTS[2];
     this.format = opts.format ?? FORMATS[0];
+    // solo formats: the player runs the course alone and the field's runs
+    // are posted afterwards, one by one
+    this.solo = !!this.format.solo;
     const theme = THEMES[this.event.theme];
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(theme.fog, theme.fogNear * 0.8, theme.fogFar * 0.85);
@@ -90,7 +93,7 @@ export class RaceScene {
         script,
         lane: this.terrain.gateLanes[b.lane],
       });
-      this.scene.add(bot.obj);
+      if (!this.solo) this.scene.add(bot.obj);
       bot.trail = new GearTrails(this.scene, this.terrain, b.gear);
       return bot;
     });
@@ -139,7 +142,7 @@ export class RaceScene {
         setTimeout(() => this.hud.countdown(''), 800);
         this.stateName = 'racing';
         this.player.frozen = false;
-        for (const b of this.bots) b.frozen = false;
+        if (!this.solo) for (const b of this.bots) b.frozen = false;
         this.gate.setPhase('go'); // lights green, bars fly, pyro + smoke
       } else if (n !== this._lastCount && n <= 3) {
         this._lastCount = n;
@@ -163,7 +166,7 @@ export class RaceScene {
         !this.player.airborne && !(this.player._grindT > 0),
         Math.abs(Math.sin(this.player.rider.gearGroup.rotation.y))
       );
-      for (const b of this.bots) {
+      for (const b of this.solo ? [] : this.bots) {
         b.update(dt, this);
         b.trail.push(
           b.obj.position.x,
@@ -173,8 +176,10 @@ export class RaceScene {
           Math.abs(Math.sin(b.rider.gearGroup.rotation.y))
         );
       }
-      this._resolveRiderCollisions(dt);
-      this._enforceDrawnOrder(dt);
+      if (!this.solo) {
+        this._resolveRiderCollisions(dt);
+        this._enforceDrawnOrder(dt);
+      }
 
       // player crosses the line
       if (!this.player.finished && this.player.progress >= this.terrain.length) {
@@ -198,7 +203,7 @@ export class RaceScene {
     const judged = this.format.scored === 'style';
     const live = [
       { name: 'You', color: 0xfbbf24, me: true, d: this.player.progress, done: this.player.finished, pts: this.player.style, pos: this.outcome.playerPos },
-      ...this.bots.map((b) => ({ name: b.identity.name, color: b.identity.color, me: false, d: b.d, done: b.finished, pts: b.style, pos: b.rank })),
+      ...(this.solo ? [] : this.bots).map((b) => ({ name: b.identity.name, color: b.identity.color, me: false, d: b.d, done: b.finished, pts: b.style, pos: b.rank })),
     ].sort((a, b) => (judged ? b.pts - a.pts || a.pos - b.pos : b.d - a.d));
     const rank = live.findIndex((r) => r.me) + 1;
 
@@ -208,6 +213,7 @@ export class RaceScene {
       progress: Math.min(1, this.player.progress / L),
       board: live,
       style: this.player.style,
+      solo: this.solo,
     });
 
     // neon FINISH signage: a lazy celebratory pulse that goes frantic once
@@ -337,7 +343,7 @@ export class RaceScene {
       playerPos,
       playerStyle: this.player.style,
       playerTime: this.time,
-      bots: this.bots.map((b) => ({ rank: b.rank, time: b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed) })),
+      bots: this.bots.map((b) => ({ rank: b.rank, time: this.solo ? null : b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed) })),
       rng: mulberry32(this.terrain.seed ^ 0x5c0e),
     });
     for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.rank).style;
@@ -351,6 +357,7 @@ export class RaceScene {
     showResults({
       event: this.event,
       format: this.format,
+      reveal: this.solo,
       standings: rows,
       playerPos,
       bet,

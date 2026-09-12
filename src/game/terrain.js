@@ -68,7 +68,7 @@ export class Terrain {
     if (format === 'bigair') {
       // the one kicker: a wide table square across the run, with a full
       // landing hill before the line
-      this.jumps.push({ s: 300, x: this.centerAt(300), w: 30, big: true });
+      this.jumps.push({ s: 230, x: this.centerAt(230), w: 30, big: true });
     } else if (!showpiece) {
       while (s < this.length - 220) {
         this.jumps.push({ s, x: this.centerAt(s) + (rng() - 0.5) * 36, w: 15 + rng() * 6 });
@@ -475,14 +475,17 @@ export class Terrain {
       const lat = 1 - ((x - j.x) / j.w) ** 2;
       if (lat <= 0) continue;
       if (j.big) {
-        // Big Air: a 20 m table curling up to a lip that actually points
-        // uphill of the grade, a knuckle drop, then a long landing hill that
-        // falls away to give the flight somewhere to end
+        // Big Air: the in-run steepens for 60 m to build speed, then a 20 m
+        // table climbs 16 m to a lip pointing well above the grade, a 5 m
+        // knuckle drop, and a 120 m landing hill that falls away under the
+        // flight before easing back to the grade
+        const a = (s - (j.s - 80)) / 60;
+        if (a > 0 && a <= 1) h -= 9 * a * lat;
         const t = (s - (j.s - 20)) / 20;
-        if (t > 0 && t <= 1) h += 12.5 * t * t * lat;
-        else if (s > j.s && s < j.s + 110) {
-          const u = (s - j.s) / 110;
-          h += lat * (9 * (1 - u) - 5 * Math.sin(Math.PI * u));
+        if (t > 0 && t <= 1) h += (-9 + 16 * t * t) * lat;
+        else if (s > j.s && s < j.s + 120) {
+          const u = (s - j.s) / 120;
+          h += lat * (2 * (1 - u) - 7 * Math.sin(Math.PI * u));
         }
         continue;
       }

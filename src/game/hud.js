@@ -3,6 +3,7 @@
 import { EQUIPMENT, TYPE_LABEL } from './equipment.js';
 import { BET_CHIPS, state } from './state.js';
 import { topPrize } from './rtp.js';
+import { fmtTime } from './formats.js';
 
 const ui = () => document.getElementById('ui');
 
@@ -158,12 +159,13 @@ export class RaceHud {
   constructor(format) {
     this.format = format;
     const judged = format && format.scored !== 'time';
+    const solo = !!(format && format.solo);
     const el = document.createElement('div');
     el.id = 'race-ui';
     el.innerHTML = `
       <div id="countdown" class="hidden"></div>
       <div class="race-top">
-        <div class="panel" id="rank-box"><div class="pos">–</div><div class="of">of 5</div></div>
+        <div class="panel" id="rank-box">${solo ? '<div class="pos solo">SOLO</div><div class="of">run</div>' : '<div class="pos">–</div><div class="of">of 5</div>'}</div>
         <div class="panel" id="format-box">${format ? format.short : 'RACE'}</div>
         <div class="panel" id="style-box"${judged ? '' : ' style="display:none"'}><div class="sty">0</div><div class="unit">style</div></div>
         <div class="panel" id="speed-box"><div class="spd">0</div><div class="unit">km/h</div></div>
@@ -172,7 +174,7 @@ export class RaceHud {
         <div id="progress-bar"><div id="progress-fill"></div></div>
         <div class="plabel">to finish</div>
       </div>
-      <div class="panel" id="mini-board"></div>
+      <div class="panel" id="mini-board"${solo ? ' style="display:none"' : ''}></div>
       <div id="trick-toast"></div>
       <div id="stumble-flash"></div>
       <div class="controls-hint" id="controls-hint"></div>`;
@@ -202,9 +204,9 @@ export class RaceHud {
     if (text === '') c.classList.add('hidden');
   }
 
-  update({ rank, speed, progress, board, style = 0 }) {
+  update({ rank, speed, progress, board, style = 0, solo = false }) {
     const sfx = ['st', 'nd', 'rd', 'th', 'th'][rank - 1] || 'th';
-    this.el.querySelector('#rank-box .pos').innerHTML = `${rank}<small>${sfx}</small>`;
+    if (!solo) this.el.querySelector('#rank-box .pos').innerHTML = `${rank}<small>${sfx}</small>`;
     this.el.querySelector('#speed-box .spd').textContent = Math.round(speed * 3.6);
     this.el.querySelector('#style-box .sty').textContent = Math.round(style);
     this.el.querySelector('#progress-fill').style.width = `${Math.min(100, progress * 100).toFixed(1)}%`;
@@ -328,7 +330,7 @@ export function showEventRoller(events, chosen, formats, format, onDone) {
 }
 
 // ------------------------------------------------------------- results ----
-export function showResults({ event, format, standings, playerPos, bet, payout, style, onAgain, onLodge }) {
+export function showResults({ event, format, standings, playerPos, bet, payout, style, reveal = false, onAgain, onLodge }) {
   const el = document.createElement('div');
   el.id = 'results';
   const sfx = ['st', 'nd', 'rd', 'th', 'th'][playerPos - 1];
@@ -340,26 +342,32 @@ export function showResults({ event, format, standings, playerPos, bet, payout, 
     scoreLine = `<div class="score-line">Time ${fmt(mine.timePts)} + Style ${fmt(mine.style)} = <b>${fmt(mine.total)}</b></div>`;
   } else if (format && mine && format.scored === 'style') {
     scoreLine = `<div class="score-line">Judges' score <b>${fmt(mine.total)}</b>${mine.total <= 0 ? ' — no tricks landed' : ''}</div>`;
+  } else if (format && mine && format.solo) {
+    scoreLine = `<div class="score-line">Your time <b>${fmtTime(mine.time)}</b></div>`;
   }
-  const judged = format && format.scored !== 'time';
+  // posted sheets show a number per rider: the judged total, or the time
+  const judged = format && (format.scored !== 'time' || format.solo);
+  const cell = (r) => (format.scored === 'time' ? fmtTime(r.score.time) : fmt(r.score.total));
+  // a solo run's sheet is posted one rider at a time, last place first
+  const rv = reveal ? ' rv' : '';
   el.innerHTML = `
     <div class="panel results-card">
       <h2>${event ? `${event.flag} ${event.name}` : 'Race Complete'}</h2>
       ${event ? `<div class="ev-place-line">${event.place}</div>` : ''}
       ${format ? `<div class="fmt-line">${format.name} &middot; ${format.tag}</div>` : ''}
-      <div class="big-pos${playerPos <= 2 ? ' win' : ''}">${playerPos}${sfx}</div>
-      <div class="payout-line${net < 0 ? ' loss' : ''}">
+      <div class="big-pos${playerPos <= 2 ? ' win' : ''}${rv ? ' rv-late' : ''}">${playerPos}${sfx}</div>
+      <div class="payout-line${net < 0 ? ' loss' : ''}${rv ? ' rv-late' : ''}">
         Bet ${fmt(bet)} &rarr; paid <b>${fmt(payout)}</b> chips
       </div>
       ${scoreLine}
       <ul class="standings">
         ${standings
           .map(
-            (r) => `<li${r.me ? ' class="me"' : ''}>
+            (r) => `<li class="${r.me ? 'me' : ''}${rv}" data-pos="${r.pos}">
               <span class="p">${r.pos}${['st', 'nd', 'rd', 'th', 'th'][r.pos - 1]}</span>
               <span class="dot" style="background:#${r.color.toString(16).padStart(6, '0')}"></span>
               <span class="nm">${r.name}</span>
-              ${judged && r.score ? `<span class="sc">${fmt(r.score.total)}</span>` : ''}
+              ${judged && r.score ? `<span class="sc">${cell(r)}</span>` : ''}
               ${r.me ? `<span class="mult">&times;${r.mult}</span>` : ''}
             </li>`
           )
@@ -371,6 +379,13 @@ export function showResults({ event, format, standings, playerPos, bet, payout, 
       </div>
     </div>`;
   ui().appendChild(el);
+  if (reveal) {
+    // post the sheet from the back of the field to the winner, then the
+    // player's placing and the payout
+    const rows = [...el.querySelectorAll('.standings li')].sort((a, b) => Number(b.dataset.pos) - Number(a.dataset.pos));
+    rows.forEach((li, i) => setTimeout(() => li.classList.add('in'), 500 + i * 750));
+    setTimeout(() => el.querySelectorAll('.rv-late').forEach((n) => n.classList.add('in')), 500 + rows.length * 750 + 200);
+  }
   el.querySelector('#res-again').addEventListener('click', () => {
     el.remove();
     onAgain();

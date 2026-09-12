@@ -499,3 +499,10 @@ html, body {
 .results-card .score-line b { color: var(--gold); }
 .standings li .nm { flex: 1; }
 .standings li .sc { opacity: 0.8; font-variant-numeric: tabular-nums; font-size: 12px; padding-left: 8px; }
+
+/* ---- solo formats: the sheet is posted one rider at a time ---- */
+#rank-box .pos.solo { font-size: 18px; letter-spacing: 0.12em; padding-top: 4px; }
+.standings li.rv { opacity: 0; transform: translateY(8px); transition: opacity 0.35s ease, transform 0.35s ease; }
+.standings li.rv.in { opacity: 1; transform: none; }
+.results-card .rv-late { opacity: 0; transition: opacity 0.45s ease; }
+.results-card .rv-late.in { opacity: 1; }

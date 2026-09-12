@@ -26,6 +26,8 @@ const course = () => page.evaluate(() => {
     glades: t.glades.map((g) => [Math.round(g.s0), Math.round(g.s1), g.side]),
     drops: t.drops.length, bridges: t.bridges.length, ledges: t.ledges.length, logs: t.logs.length,
     animals: r.animals.events.length,
+    solo: r.solo, botsOnCourse: r.bots.filter((b) => b.obj.parent).length,
+    rankBox: document.querySelector('#rank-box .pos')?.textContent, miniBoard: getComputedStyle(document.querySelector('#mini-board')).display,
     badge: document.querySelector('#format-box')?.textContent,
     styleBox: getComputedStyle(document.querySelector('#style-box')).display,
     finishS: -r._finishPorts[0].z,
