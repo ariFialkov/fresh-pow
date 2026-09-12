@@ -13,7 +13,7 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
 const fail = (msg) => { console.error('E2E FAILED:', msg); process.exit(1); };
 
-await page.goto(`http://localhost:${process.env.PORT || 4175}/`);
+await page.goto(`http://localhost:${process.env.PORT || 4175}/?format=race`);
 await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
 
 const balanceBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance ?? 1000);

@@ -15,7 +15,7 @@ page.on('console', (m) => {
 });
 page.on('pageerror', (e) => errors.push(String(e)));
 
-await page.goto('http://localhost:4173/');
+await page.goto('http://localhost:4173/?format=race');
 await page.waitForSelector('#menu-ui', { timeout: 10000 });
 console.log('menu mounted');
 

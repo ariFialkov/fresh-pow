@@ -10,7 +10,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 const fail = (m) => { console.error('COLLIDE FAILED:', m); process.exit(1); };
 
-await page.goto(`http://localhost:${process.env.PORT || 4179}/`);
+await page.goto(`http://localhost:${process.env.PORT || 4179}/?format=race`);
 
 // need a draw with at least one destined-ahead bot (playerPos > 1) — only
 // those can physically reach the player (behind-bots are clamped 4 m back)

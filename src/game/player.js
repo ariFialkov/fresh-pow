@@ -264,6 +264,10 @@ export class Player {
       ({ nx, nz } = this._tubeClamp(nx, nz, dir));
 
       const ground = t.groundAt(nx, nz);
+      // the climb rate a takeoff throws with is last frame's: at the lip the
+      // ground ahead has already dropped away, and folding that drop in
+      // would read a kicker as a fall
+      const climbVy = this.groundVy;
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
       this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
 
@@ -300,7 +304,7 @@ export class Player {
         // grade — low fps at speed — never reads as the ground falling away)
         // ground fell away — takeoff
         this.airborne = true;
-        this.vy = clamp(this.groundVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
+        this.vy = clamp(climbVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
         // pop: released tuck right at the lip
         if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
           this.vy += 4.2;
