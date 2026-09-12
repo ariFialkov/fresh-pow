@@ -295,7 +295,9 @@ export class Player {
 
       if (lipLaunch) {
         // airborne now — skip ground follow, collisions come back on landing
-      } else if (ground < this.pos.y - 0.55 && this.speed > 6) {
+      } else if (ground < this.pos.y - Math.max(0.55, 0.9 * this.speed * dt) && this.speed > 6) {
+        // (the threshold grows with the step so a long frame on a steep
+        // grade — low fps at speed — never reads as the ground falling away)
         // ground fell away — takeoff
         this.airborne = true;
         this.vy = clamp(this.groundVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder

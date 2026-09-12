@@ -51,7 +51,9 @@ const settle = (style) => page.evaluate((style) => {
 
 const ordered = (rows) => rows.every((r, i) => i === 0 || Number(rows[i - 1].score.replace(/,/g, '')) >= Number(r.score.replace(/,/g, '')));
 
-for (const f of ['race', 'combined', 'glade', 'bigair', 'halfpipe']) {
+// FMT=bigair,halfpipe narrows the run to the formats named
+const list = process.env.FMT ? process.env.FMT.split(',') : ['race', 'combined', 'glade', 'bigair', 'halfpipe'];
+for (const f of list) {
   await load(f);
   console.log(`\n=== ${f} ===`);
   console.log('course:', JSON.stringify(await course()));
