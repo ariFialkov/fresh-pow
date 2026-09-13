@@ -15,18 +15,16 @@ for (const [w, h] of [[1000, 640], [400, 760]]) {
   await page.screenshot({ path: `scratch-lodge-${w}.png` });
   console.log('lodge', w, await page.evaluate(() => ({ gear: document.querySelector('#gear-name').textContent, fit: document.querySelector('#fit-name').textContent, start: document.querySelector('#start-btn').textContent })));
   if (w === 1000) {
-    // catch a flourish: wait for one to start
-    await page.waitForFunction(() => !!window.__fp?.menu?.flair, undefined, { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'scratch-lodge-flair.png' });
-    console.log('flair', await page.evaluate(() => window.__fp.menu.flair?.kind ?? null));
     await page.click('#shop-btn');
     await page.waitForTimeout(400);
     await page.screenshot({ path: 'scratch-shop.png' });
-    console.log('shop cards', await page.evaluate(() => document.querySelectorAll('.item-card').length));
-    await page.click('.stab[data-tab="outfit"]');
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: 'scratch-shop-outfits.png' });
+    console.log('shop cards', await page.evaluate(() => ({ n: document.querySelectorAll('.item-card').length, top: document.querySelector('.shop-card').getBoundingClientRect().top, h: document.querySelector('.shop-card').getBoundingClientRect().height })));
+    for (const tab of ['ski', 'outfit']) {
+      await page.click(`.stab[data-tab="${tab}"]`);
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `scratch-shop-${tab}.png` });
+      console.log(tab, await page.evaluate(() => ({ top: document.querySelector('.shop-card').getBoundingClientRect().top, h: document.querySelector('.shop-card').getBoundingClientRect().height })));
+    }
     await page.click('#shop-close');
     // the roller: normal flow, no forced event
     page.on('console', (m) => { if (m.type() === 'error') console.error('console:', m.text()); });

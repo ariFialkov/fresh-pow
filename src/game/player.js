@@ -3,7 +3,7 @@
 // betting result: bots pace themselves around whatever the player does.
 import * as THREE from 'three';
 import { createRider, setPose } from './riderMesh.js';
-import { tubeRadii } from './terrain.js';
+import { tubeRadii, rockPenetration } from './terrain.js';
 import { clamp, lerp } from './rng.js';
 
 const G = 8; // arcade gravity along the slope — deep snow eats the pull
@@ -13,6 +13,7 @@ const TUCK_DRAG = 0.55;
 const BRAKE_DECEL = 14;
 const MAX_YAW = 1.15; // radians away from straight downhill
 const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
+const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
 
@@ -581,9 +582,24 @@ export class Player {
     for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
       const dx = this.pos.x - o.x;
       const dz = this.pos.z - o.z;
+      if (o.kind === 'rock') {
+        // boulders hit on their own outline (yawed and scaled like the
+        // instance), plus a shoulder's width — riding past one clean stays
+        // clean. r is only the broad phase.
+        const r = o.r + ROCK_PAD;
+        if (dx * dx + dz * dz > r * r) continue;
+        const hit = rockPenetration(o, dx, dz);
+        if (hit.depth > -ROCK_PAD) {
+          this.stumble('hit a boulder');
+          this.pos.x += hit.nx * 1.2;
+          this.pos.z += hit.nz * 1.2;
+          break;
+        }
+        continue;
+      }
       const r = o.r + 0.7;
       if (dx * dx + dz * dz < r * r) {
-        this.stumble(o.kind === 'tree' ? 'clipped a tree' : o.kind === 'log' ? 'slammed a log' : 'hit a boulder');
+        this.stumble(o.kind === 'tree' ? 'clipped a tree' : 'slammed a log');
         // shove clear so we don't re-trigger
         const d = Math.max(0.1, Math.hypot(dx, dz));
         this.pos.x += (dx / d) * 1.2;

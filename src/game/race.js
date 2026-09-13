@@ -2,7 +2,7 @@
 // The finishing order was drawn from the paytable before the gates open —
 // everything the bots do afterwards is theater in service of that draw.
 import * as THREE from 'three';
-import { Terrain } from './terrain.js';
+import { Terrain, rockPenetration } from './terrain.js';
 import { FORMATS, liveBotStyle, settleScores } from './formats.js';
 import { Player } from './player.js';
 import { Bot } from './bots.js';
@@ -15,6 +15,9 @@ import { drawOutcome, multiplierFor, EVENTS } from './rtp.js';
 import { THEMES } from './themes.js';
 import { Animals } from './animals.js';
 import { state, save } from './state.js';
+
+// style points for flattening a rider in the combined
+const KNOCKDOWN_PTS = 150;
 
 export class RaceScene {
   /**
@@ -121,7 +124,7 @@ export class RaceScene {
     this._updateCamera(1, true);
 
     // debug/test hook (also handy in devtools)
-    window.__fp = { race: this };
+    window.__fp = { race: this, rockPenetration };
   }
 
   onBotFinish(bot) {
@@ -230,6 +233,9 @@ export class RaceScene {
       }
     }
 
+    // boost gate chevrons chase downhill: the pair flash in alternation
+    this.terrain.pulseGates(this.time);
+
     this.animals.update(dt, this.player.progress, this.player);
     this.fx.update(dt);
     this.pyro.update(dt);
@@ -287,7 +293,14 @@ export class RaceScene {
         p.knockDown(b.identity.name);
       } else if (p.speed > b.speed + 1.5) {
         b.knockDown();
-        this.hud.trickToast('BOOM!', `you took out ${b.identity.name}`);
+        // a knockdown is worth style in the combined — banked on the spot,
+        // nothing to land
+        if (this.format.scored === 'both') {
+          p.style += KNOCKDOWN_PTS;
+          this.hud.trickToast(`BOOM! +${KNOCKDOWN_PTS}`, `you took out ${b.identity.name}`);
+        } else {
+          this.hud.trickToast('BOOM!', `you took out ${b.identity.name}`);
+        }
         this.fx.burst(b.obj.position, { x: 0, z: -1 }, { count: 100, speed: 5, up: 4, spread: 2.4, size: 0.28 });
         p.speed *= 0.9; // shoulder check isn't free
       } else {

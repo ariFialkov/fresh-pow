@@ -6,6 +6,7 @@ import { topPrize } from './rtp.js';
 import { fmtTime } from './formats.js';
 import { OUTFITS, outfitById, owns, buy, priceOf, SHOP_TABS, shelf } from './wardrobe.js';
 import { RIDE_ICON, FORMAT_ICON, CUP_CREST, CHIP_ICON, LOCK_ICON, CHECK_ICON, SHOP_ICON } from './icons.js';
+import { itemArt, releaseItemArt } from './itemArt.js';
 
 const ui = () => document.getElementById('ui');
 
@@ -278,7 +279,7 @@ export function openShop({ onEquip, onClose }) {
             ? `<button class="item-btn" data-equip="${it.id}">Equip</button>`
             : `<button class="item-btn buy" data-buy="${it.id}"${state.balance < it.price ? ' disabled' : ''}>${CHIP_ICON} ${fmt(it.price)}</button>`;
         return `<div class="item-card${equipped ? ' on' : ''}">
-          <div class="item-art ${it.kind}">${it.kind === 'ride' ? RIDE_ICON[it.type] : ''}<span class="swatch">${swatch}</span></div>
+          <div class="item-art ${it.kind}"><img src="${itemArt(it)}" alt=""><span class="swatch">${swatch}</span></div>
           <div class="item-name">${it.name}</div>
           <div class="item-tag">${it.tag}</div>
           ${btn}
@@ -312,6 +313,7 @@ export function openShop({ onEquip, onClose }) {
   }
   el.querySelector('#shop-close').addEventListener('click', () => {
     el.remove();
+    releaseItemArt();
     onClose?.();
   });
   bal();

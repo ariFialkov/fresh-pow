@@ -45,7 +45,7 @@ const settle = (style) => page.evaluate((style) => {
   const rows = [...document.querySelectorAll('#results .standings li')].map((li) => ({
     pos: li.querySelector('.p').textContent,
     name: li.querySelector('.nm').textContent,
-    score: li.querySelector('.sc')?.textContent ?? null,
+    score: li.querySelector('.sc')?.lastChild?.textContent ?? null, // the total (the combined breakdown sits in a <small> before it)
   }));
   const line = document.querySelector('#results .score-line, #results .style-line')?.textContent.trim();
   const fmtLine = document.querySelector('#results .fmt-line')?.textContent.trim();

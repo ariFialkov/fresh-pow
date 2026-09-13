@@ -60,7 +60,7 @@ export const SHOP_TABS = [
 
 export function shelf(tab) {
   const rides = EQUIPMENT.map((e) => ({ kind: 'ride', id: e.id, type: e.type, name: e.name, price: priceOf(e.id), colors: [e.deck, e.accent], tag: e.type === 'ski' ? 'Skis' : e.type === 'board' ? 'Snowboard' : 'Sled' }));
-  const fits = OUTFITS.map((o) => ({ kind: 'outfit', id: o.id, type: 'outfit', name: o.name, price: o.price, colors: [o.jacket, o.jacket2, o.pants], tag: o.tag }));
+  const fits = OUTFITS.map((o) => ({ kind: 'outfit', id: o.id, type: 'outfit', name: o.name, price: o.price, colors: [o.jacket, o.jacket2, o.pants], tag: o.tag, outfit: o }));
   if (tab === 'outfit') return fits;
   if (tab === 'featured') {
     // the flashiest of each shelf, priciest first

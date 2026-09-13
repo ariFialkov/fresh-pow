@@ -140,6 +140,11 @@ function buildGear(gear) {
   return g;
 }
 
+/** A ride on its own (skis, board or sled) — the pro shop's product shots. */
+export function createGearMesh(gear) {
+  return buildGear(gear);
+}
+
 // ---------------------------------------------------------------- rider ----
 export function createRider(gear, helmetColor, outfit = null) {
   const root = new THREE.Group();

@@ -35,10 +35,32 @@ export function rollFormat(r = Math.random()) {
   return FORMATS[0];
 }
 
-/** Race-time points for the combined format: faster is more, floored at 0. */
-export function timePoints(seconds) {
-  return Math.max(0, Math.round(3000 - 15 * seconds));
+/**
+ * Race-time points for the combined format, by finishing position: 5000
+ * for the win down to 1000 for last, plus 500 a second for every second
+ * clear of the next rider across the line (nothing extra for last place).
+ * A tenth either way is a photo finish, not a swing in the standings; a
+ * rider who cleared the field by three seconds is paid for it.
+ * @param times finish times in seconds, one per rider
+ * @returns points in the same order
+ */
+export function timePointsFor(times) {
+  const order = times.map((t, i) => ({ t, i })).sort((a, b) => a.t - b.t);
+  const pts = new Array(times.length).fill(0);
+  order.forEach((r, pos) => {
+    const base = Math.max(1, 6 - (pos + 1)) * 1000;
+    const next = order[pos + 1];
+    const lead = next && pos < 4 ? Math.max(0, next.t - r.t) : 0;
+    // the lead bonus stops just short of a placing, so a big gap can never
+    // lift a rider over the one who beat them across the line
+    pts[r.i] = base + Math.min(999, Math.round(lead * 500));
+  });
+  return pts;
 }
+
+// what a judged run the player never scored on still posts for the riders
+// drawn ahead: a step per placing, so only the back of the sheet reads zero
+const ZERO_STEP = { bigair: 260, halfpipe: 420 };
 
 /** m:ss.xx for the posted sheet. */
 export function fmtTime(seconds) {
@@ -50,8 +72,9 @@ export function fmtTime(seconds) {
 /**
  * A bot's trick tally as the run unfolds, dealt around the player's own.
  * Bots never score a trick until the player has: if the player ends on
- * zero, every bot ends on zero too, and the judges' sheet is ordered by
- * the draw alone — the result stays deterministic.
+ * zero, every bot on the hill ends on zero too, and the sheet is ordered by
+ * the draw alone — the result stays deterministic. (The solo judged
+ * formats post the riders drawn ahead a run of their own at settlement.)
  * @param rankGap playerPos - botRank: positive when the bot finishes ahead
  */
 export function liveBotStyle(playerStyle, rankGap, prog) {
@@ -70,27 +93,81 @@ export function liveBotStyle(playerStyle, rankGap, prog) {
  */
 export function settleScores(format, { playerPos, playerStyle, playerTime, bots, rng }) {
   const scored = format.scored;
-  const pTime = timePoints(playerTime);
+  // every rider's time first: the position-based time points need the
+  // whole field across the line
+  const times = bots.map((b) => {
+    const k = playerPos - b.rank; // + = finishes ahead of the player
+    if (b.time != null) return b.time;
+    // posted run: a rank's worth of seconds each way, jitter under half a
+    // step so the order can never cross
+    const step = 1.4 + rng() * 1.2;
+    return Math.max(5, playerTime - k * step + (rng() - 0.5) * 0.6 * step);
+  });
+  // the clock must agree with the draw: riders still on course when the
+  // player crossed have their finish projected at their current pace, and
+  // two projections can land a hair out of order — walk the field away
+  // from the player in both directions, keeping every rider a beat behind
+  // the one drawn ahead
+  const byRank = bots.map((b, i) => ({ rank: b.rank, i })).sort((a, b) => a.rank - b.rank);
+  let prev = playerTime;
+  for (const r of byRank.filter((r) => r.rank > playerPos)) {
+    times[r.i] = Math.max(times[r.i], prev + 0.12);
+    prev = times[r.i];
+  }
+  let next = playerTime;
+  for (const r of byRank.filter((r) => r.rank < playerPos).reverse()) {
+    times[r.i] = Math.max(5, Math.min(times[r.i], next - 0.12));
+    next = times[r.i];
+  }
+  const timePts = scored === 'both' ? timePointsFor([playerTime, ...times]) : [playerTime, ...times].map(() => 0);
+  const pTime = timePts[0];
   const pTotal = scored === 'style' ? playerStyle : scored === 'both' ? pTime + playerStyle : pTime;
   const gap = Math.max(35, 0.1 * pTotal);
-  const rows = bots.map((b) => {
-    const k = playerPos - b.rank; // + = finishes ahead of the player
-    let time = b.time;
-    if (time == null) {
-      // posted run: a rank's worth of seconds each way, jitter under half a
-      // step so the order can never cross
-      const step = 1.4 + rng() * 1.2;
-      time = Math.max(5, playerTime - k * step + (rng() - 0.5) * 0.6 * step);
-    }
-    const bTime = timePoints(time);
+  const zeroStep = ZERO_STEP[format.id] ?? 0;
+  const rows = bots.map((b, i) => {
+    const k = playerPos - b.rank;
+    const time = times[i];
+    const bTime = timePts[i + 1];
     let style = 0;
-    if (playerStyle > 0 && scored !== 'time') {
+    if (playerStyle > 0 && scored === 'both') {
+      // a trick tally in the player's league, a shade better for the riders
+      // drawn ahead; the time points carry the order, the pass below makes
+      // sure of it
+      style = Math.max(0, Math.round(playerStyle * (1 + 0.1 * k) + (rng() - 0.5) * 0.16 * playerStyle));
+    } else if (playerStyle > 0 && scored === 'style') {
       const jitter = (rng() - 0.5) * 0.5 * gap;
-      const target = pTotal + k * gap + jitter;
-      style = Math.max(0, Math.round(scored === 'both' ? target - bTime : target));
+      style = Math.max(0, Math.round(pTotal + k * gap + jitter));
+    } else if (scored === 'style' && k > 0 && zeroStep) {
+      // the player never scored: the riders drawn ahead still post a run,
+      // stepping up from the zero line, so only the back of the field is
+      // blank — the draw decides who those riders are
+      style = Math.round(k * zeroStep + (rng() - 0.5) * 0.5 * zeroStep);
     }
     const total = scored === 'style' ? style : scored === 'both' ? bTime + style : bTime;
     return { rank: b.rank, time, timePts: bTime, style, total };
   });
+  if (scored === 'both') {
+    // the combined sheet must rank in the drawn order: walk down from the
+    // player trimming any rider behind who came out too high, then up from
+    // the player lifting any rider ahead who came out too low
+    const step = Math.max(20, Math.round(0.03 * pTotal));
+    const ranked = [...rows].sort((a, b) => a.rank - b.rank);
+    let ceiling = pTotal;
+    for (const r of ranked.filter((r) => r.rank > playerPos)) {
+      if (r.total > ceiling - step) {
+        r.style = Math.max(0, ceiling - step - r.timePts);
+        r.total = r.timePts + r.style;
+      }
+      ceiling = r.total;
+    }
+    let floor = pTotal;
+    for (const r of ranked.filter((r) => r.rank < playerPos).reverse()) {
+      if (r.total < floor + step) {
+        r.style = floor + step - r.timePts;
+        r.total = r.timePts + r.style;
+      }
+      floor = r.total;
+    }
+  }
   return { player: { time: playerTime, timePts: pTime, style: playerStyle, total: pTotal }, bots: rows };
 }

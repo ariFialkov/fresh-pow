@@ -24,8 +24,10 @@ export function rosterFor(seed) {
   return identities.map((identity, i) => ({ identity, gear: gear[i], lane: lanes[i] }));
 }
 
-// idle flourishes the hero throws every so often
-const FLAIRS = ['wave', 'spin', 'pop', 'bboy'];
+// The fitting room, bet and start button stack up the bottom of the screen,
+// so the hero is framed in the top part: the view is shifted so the rider
+// (board included) sits above the panels instead of centred behind them.
+const HERO_LIFT = 0.2; // fraction of the viewport height the frame moves up
 
 export class MenuScene {
   /**
@@ -38,7 +40,9 @@ export class MenuScene {
     this.onStart = onStart;
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0xdcefff, 220, 1100);
-    this.camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 4000);
+    // a wider lens than the chase camera: the rider stays big and close
+    // while the start house still fits in above them
+    this.camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.1, 4000);
 
     this.terrain = new Terrain(seed);
     const tg = new THREE.Group();
@@ -96,9 +100,6 @@ export class MenuScene {
     });
 
     this.t = 0;
-    this.flair = null; // { kind, t, dur }
-    this.nextFlair = 3.5 + rng() * 3;
-    this._off = []; // joint offsets applied last frame, undone before the pose runs
 
     // debug/test hook (also handy in devtools)
     window.__fp = { menu: this, setPose };
@@ -112,7 +113,6 @@ export class MenuScene {
     this.playerRider = createRider(gear, 0xfbbf24, outfit);
     this.playerRider.root.position.copy(this.hero);
     this.scene.add(this.playerRider.root);
-    this._off = [];
   }
 
   _start() {
@@ -128,71 +128,6 @@ export class MenuScene {
         lane: this.botLanes[i],
       })),
     });
-  }
-
-  /** Occasional idle flourish on top of the breathing idle pose. */
-  _updateFlair(dt) {
-    const r = this.playerRider;
-    if (!r) return;
-    // undo last frame's joint offsets so the pose springs see their own state
-    for (const [obj, axis, v] of this._off) obj.rotation[axis] -= v;
-    this._off = [];
-
-    if (!this.flair) {
-      this.nextFlair -= dt;
-      if (this.nextFlair <= 0) {
-        const kind = FLAIRS[Math.floor(Math.random() * FLAIRS.length)];
-        this.flair = { kind, t: 0, dur: kind === 'wave' ? 2.4 : kind === 'bboy' ? 2.6 : 1.3 };
-      }
-    }
-    const f = this.flair;
-    let crouch = 0;
-    let spin = 0;
-    let hop = 0;
-    let tilt = 0;
-    if (f) {
-      f.t += dt;
-      const u = Math.min(1, f.t / f.dur);
-      const env = Math.sin(Math.PI * u); // 0 → 1 → 0 over the move
-      if (f.kind === 'wave') {
-        // arm up and out, hand wagging
-        const arm = r.parts.arms[1];
-        this._push(arm.shoulder, 'z', -2.3 * Math.min(1, env * 2.2));
-        this._push(arm.shoulder, 'x', -0.5 * Math.min(1, env * 2.2));
-        this._push(arm.elbow, 'z', Math.sin(f.t * 13) * 0.55 * Math.min(1, env * 2.2));
-        this._push(r.parts.head, 'z', 0.18 * env);
-      } else if (f.kind === 'spin') {
-        // a hop with a full turn
-        const e = u * u * (3 - 2 * u);
-        spin = e * Math.PI * 2;
-        hop = env * 0.55;
-        crouch = u < 0.25 ? u * 4 : 0;
-      } else if (f.kind === 'pop') {
-        // squat and pop, arms thrown
-        crouch = u < 0.45 ? env : 0;
-        hop = u > 0.45 ? Math.sin(Math.PI * (u - 0.45) / 0.55) * 0.7 : 0;
-        for (const arm of r.parts.arms) this._push(arm.shoulder, 'z', arm.side * 2.4 * (u > 0.45 ? env : 0));
-      } else if (f.kind === 'bboy') {
-        // drop low and windmill through a couple of turns
-        crouch = Math.min(1, env * 2);
-        spin = u * Math.PI * 4;
-        tilt = 0.28 * env;
-        for (const arm of r.parts.arms) this._push(arm.shoulder, 'z', arm.side * (1.4 + Math.sin(f.t * 9 + arm.side) * 0.9) * env);
-      }
-      if (u >= 1) {
-        this.flair = null;
-        this.nextFlair = 5 + Math.random() * 5;
-      }
-    }
-    setPose(r, { idle: true, crouch, t: this.t, dt });
-    r.root.rotation.y = spin;
-    r.root.rotation.x = tilt;
-    r.root.position.y = this.hero.y + hop;
-  }
-
-  _push(obj, axis, v) {
-    obj.rotation[axis] += v;
-    this._off.push([obj, axis, v]);
   }
 
   update(dt) {
@@ -213,26 +148,26 @@ export class MenuScene {
       }
     }
 
-    // the field breathes in the gates; the hero idles with flourishes
+    // the field breathes in the gates; the hero stands and breathes too
     for (const [i, r] of this.botRiders.entries()) {
       setPose(r, { idle: true, t: this.t + i * 1.7, dt });
       r.rig.rotation.z = Math.sin(this.t * 1.3 + i * 2.1) * 0.03;
     }
-    this._updateFlair(dt);
+    if (this.playerRider) setPose(this.playerRider, { idle: true, t: this.t, dt });
 
     // hovering hero camera: a slow swing across the front of the rider,
-    // high enough to look down at them, the start house rising behind
+    // the start house rising behind
     const h = this.hero;
     const a = Math.sin(this.t * 0.22) * 0.75;
-    const R = 4.4;
+    const R = 4.0;
     const cx = h.x + Math.sin(a) * R;
     const cz = h.z - Math.cos(a) * R;
     // low and tilted up: on this grade a chest-high camera only sees snow
     // behind the rider, but from knee height the gate booths and the start
     // house rise into the frame behind them
-    const cy = Math.max(h.y + 0.95 + Math.sin(this.t * 0.31) * 0.12, this.terrain.groundAt(cx, cz) + 0.7);
+    const cy = Math.max(h.y + 0.9 + Math.sin(this.t * 0.31) * 0.12, this.terrain.groundAt(cx, cz) + 0.7);
     this.camera.position.set(cx, cy, cz);
-    this.camera.lookAt(h.x, h.y + 1.35, h.z);
+    this.camera.lookAt(h.x, h.y + 1.4, h.z);
 
     this.gate.update(dt, this.t, this.fx, null, this.camera.position.z);
     this.fx.update(dt);
@@ -241,6 +176,9 @@ export class MenuScene {
 
   resize(w, h) {
     this.camera.aspect = w / h;
+    // render a window sitting lower in the full frame, so everything the
+    // camera looks at lands higher on screen — the hero clears the panels
+    this.camera.setViewOffset(w, h, 0, Math.round(h * HERO_LIFT), w, h);
     this.camera.updateProjectionMatrix();
   }
 

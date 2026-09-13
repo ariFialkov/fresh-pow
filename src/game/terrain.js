@@ -49,6 +49,82 @@ function hashJitter(a, b, c) {
   return (n - Math.floor(n)) - 0.5;
 }
 
+// The boulder: one jittered icosahedron every rock on the mountain is an
+// instance of (scaled and yawed per rock), so its footprint can be measured
+// once and used as the collider — the shape the rider hits is the shape
+// they see, not a circle around it.
+let _rockGeo = null;
+function rockGeometry() {
+  if (_rockGeo) return _rockGeo;
+  const g = new THREE.IcosahedronGeometry(1.1, 1);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const jx = hashJitter(pos.getX(i), pos.getY(i), pos.getZ(i));
+    pos.setXYZ(
+      i,
+      pos.getX(i) * (1 + jx * 0.22),
+      pos.getY(i) * (1 + hashJitter(pos.getY(i), pos.getZ(i), pos.getX(i)) * 0.18),
+      pos.getZ(i) * (1 + hashJitter(pos.getZ(i), pos.getX(i), pos.getY(i)) * 0.22)
+    );
+  }
+  g.computeVertexNormals();
+  g.translate(0, 0.55, 0);
+  _rockGeo = g;
+  return g;
+}
+
+// The boulder's footprint as a polar outline: for each of ROCK_BINS
+// headings from the centre, how far out the crag reaches (unscaled model
+// units) across the band a rider's body sweeps. Each vertex stands in for
+// the outline around its own heading, so the profile follows the crag's
+// lobes and hollows rather than a circle drawn around the whole thing.
+export const ROCK_BINS = 64;
+const ROCK_WINDOW = 0.42; // rad either side of a vertex that it shapes
+let _rockOutline = null;
+export function rockOutline() {
+  if (_rockOutline) return _rockOutline;
+  const pos = rockGeometry().attributes.position;
+  const out = new Float32Array(ROCK_BINS).fill(0);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y < -0.05 || y > 1.45) continue; // knee-to-shoulder band, any rock scale
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const r = Math.hypot(x, z);
+    const av = Math.atan2(z, x);
+    for (let k = 0; k < ROCK_BINS; k++) {
+      let d = (k / ROCK_BINS) * Math.PI * 2 - av;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      if (Math.abs(d) > ROCK_WINDOW) continue;
+      out[k] = Math.max(out[k], r * Math.cos(d));
+    }
+  }
+  _rockOutline = out;
+  return out;
+}
+
+/**
+ * How far a point (dx, dz from the rock's centre, world axes) sits inside
+ * a rock's outline: positive = penetration, negative = clear by that much.
+ * Also returns the outward (radial) normal, for the shove.
+ */
+export function rockPenetration(rock, dx, dz) {
+  const out = rockOutline();
+  // undo the instance's yaw: world = R(rot) · local
+  const c = Math.cos(rock.rot);
+  const s = Math.sin(rock.rot);
+  const lx = dx * c - dz * s;
+  const lz = dx * s + dz * c;
+  const d = Math.hypot(lx, lz);
+  let a = Math.atan2(lz, lx) / (Math.PI * 2);
+  a = (a - Math.floor(a)) * ROCK_BINS;
+  const k0 = Math.floor(a) % ROCK_BINS;
+  const f = a - Math.floor(a);
+  const reach = (out[k0] * (1 - f) + out[(k0 + 1) % ROCK_BINS] * f) * rock.sc;
+  const inv = d > 1e-6 ? 1 / d : 0;
+  return { depth: reach - d, nx: dx * inv, nz: dz * inv };
+}
+
 export class Terrain {
   constructor(seed, theme = THEMES.utah, format = 'race') {
     this.seed = seed >>> 0;
@@ -190,8 +266,12 @@ export class Terrain {
     const addRock = (x, sPos, collides) => {
       const sc = 1.1 + rng() * 1.6;
       const z = -sPos;
-      rockXf.push({ x, z, sc, rot: rng() * Math.PI * 2 });
-      if (collides) this.obstacles.push({ x, z, r: 1.3 * sc, kind: 'rock' });
+      const rot = rng() * Math.PI * 2;
+      rockXf.push({ x, z, sc, rot });
+      // r is only the broad phase — the hit itself is tested against the
+      // boulder's own outline (rockPenetration), yawed and scaled like the
+      // instance the rider sees
+      if (collides) this.obstacles.push({ x, z, r: 1.35 * sc, kind: 'rock', sc, rot });
     };
 
     const nearBridge = (ts) => this.bridges.some((b) => Math.abs(b.s - ts) < b.len + 12);
@@ -964,22 +1044,9 @@ export class Terrain {
 
   _buildRocksAndFlags(group, m, q, up, sc) {
     const snowCapMat = new THREE.MeshLambertMaterial({ color: 0xf4f8fd });
-    // craggy boulders: jittered icosahedron + a settled snow cap on top
-    const rockGeo = new THREE.IcosahedronGeometry(1.1, 1);
-    {
-      const pos = rockGeo.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        const jx = hashJitter(pos.getX(i), pos.getY(i), pos.getZ(i));
-        pos.setXYZ(
-          i,
-          pos.getX(i) * (1 + jx * 0.22),
-          pos.getY(i) * (1 + hashJitter(pos.getY(i), pos.getZ(i), pos.getX(i)) * 0.18),
-          pos.getZ(i) * (1 + hashJitter(pos.getZ(i), pos.getX(i), pos.getY(i)) * 0.22)
-        );
-      }
-      rockGeo.computeVertexNormals();
-    }
-    rockGeo.translate(0, 0.55, 0);
+    // craggy boulders: the shared jittered icosahedron (also the collider's
+    // outline) + a settled snow cap on top
+    const rockGeo = rockGeometry();
     const rockSnowGeo = new THREE.IcosahedronGeometry(0.92, 1);
     rockSnowGeo.scale(1, 0.32, 1);
     rockSnowGeo.translate(0, 1.18, 0);
@@ -1061,7 +1128,10 @@ export class Terrain {
     });
     group.add(poles, redFlags, blueFlags);
 
-    // boost gates: paired flags in the event's accent with a lit line between
+    // boost gates: paired flags in the event's accent, and between them a
+    // double chevron laid on the snow in the start line's LED cyan — thin
+    // strips, not a painted band — that chase downhill (pulseGates)
+    this.gateMats = [];
     if (this.boostGates.length) {
       const bg = this.boostGates;
       const upV = new THREE.Vector3(0, 1, 0);
@@ -1069,13 +1139,38 @@ export class Terrain {
       const gFlagMat = new THREE.MeshLambertMaterial({ color: accent, emissive: accent.clone().multiplyScalar(0.4), side: THREE.DoubleSide });
       const gPoles = new THREE.InstancedMesh(poleGeo, poleMat, bg.length * 2);
       const gFlags = new THREE.InstancedMesh(flagGeo, gFlagMat, bg.length * 2);
-      const lineGeo = new THREE.PlaneGeometry(1, 1);
-      lineGeo.rotateX(-Math.PI / 2);
-      const lineMat = new THREE.MeshBasicMaterial({
-        color: accent, transparent: true, opacity: 0.6, depthWrite: false,
-        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-      });
-      const lines = new THREE.InstancedMesh(lineGeo, lineMat, bg.length);
+      // one chevron strip, unit half-width, apex pointing downhill (-z)
+      const chevron = (W) => {
+        const H = 1.4; // apex ahead of the arm tips
+        const T = 0.42; // strip thickness
+        const sh = new THREE.Shape();
+        sh.moveTo(-W, 0);
+        sh.lineTo(0, H);
+        sh.lineTo(W, 0);
+        sh.lineTo(W, -T);
+        sh.lineTo(0, H - T);
+        sh.lineTo(-W, -T);
+        sh.closePath();
+        const geo = new THREE.ShapeGeometry(sh);
+        geo.rotateX(-Math.PI / 2); // shape +y -> world -z (downhill)
+        return geo;
+      };
+      const chevGeo = [chevron(1), chevron(1)];
+      chevGeo[1].translate(0, 0, 1.0); // the trailing chevron sits uphill of the lead
+      for (const cg of chevGeo) {
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x38bdf8, transparent: true, opacity: 0.95, depthWrite: false,
+          polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+        });
+        this.gateMats.push(mat);
+        const strips = new THREE.InstancedMesh(cg, mat, bg.length);
+        bg.forEach((g, i) => {
+          q.setFromUnitVectors(upV, this.normalAt(g.x, -g.s));
+          m.compose(new THREE.Vector3(g.x, this.heightAt(g.x, -g.s) + 0.06, -g.s + 0.3), q, sc.set(g.w - 0.35, 1, 1));
+          strips.setMatrixAt(i, m);
+        });
+        group.add(strips);
+      }
       bg.forEach((g, i) => {
         for (const [k, side] of [[0, -1], [1, 1]]) {
           const x = g.x + side * g.w;
@@ -1086,11 +1181,18 @@ export class Terrain {
           m.compose(pos, q.setFromAxisAngle(upV, side < 0 ? Math.PI : 0), sc.set(1, 1, 1)); // flags fly outward
           gFlags.setMatrixAt(i * 2 + k, m);
         }
-        q.setFromUnitVectors(upV, this.normalAt(g.x, -g.s));
-        m.compose(new THREE.Vector3(g.x, this.heightAt(g.x, -g.s) + 0.05, -g.s), q, sc.set(g.w * 2 - 0.4, 1, 1.2));
-        lines.setMatrixAt(i, m);
       });
-      group.add(gPoles, gFlags, lines);
+      group.add(gPoles, gFlags);
+    }
+  }
+
+  /** The gate chevrons flash in alternation — a chase running downhill. */
+  pulseGates(t) {
+    if (!this.gateMats) return;
+    for (const [i, mat] of this.gateMats.entries()) {
+      // lead chevron peaks first, trailing one half a beat behind
+      const pulse = 0.5 + 0.5 * Math.sin(t * 7 + i * Math.PI);
+      mat.color.setHSL(0.55, 0.95, 0.45 + pulse * 0.45); // cyan to near-white
     }
   }
 
