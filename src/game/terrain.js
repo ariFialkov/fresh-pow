@@ -1129,49 +1129,67 @@ export class Terrain {
     group.add(poles, redFlags, blueFlags);
 
     // boost gates: paired flags in the event's accent, and between them a
-    // double chevron laid on the snow in the start line's LED cyan — thin
-    // strips, not a painted band — that chase downhill (pulseGates)
-    this.gateMats = [];
+    // double chevron in the start line's LED cyan — thin strips draped over
+    // the snow (every vertex sits on the surface, so no mogul buries them)
+    // that chase downhill and flare white with the flags when a rider
+    // threads the gate (pulseGates / flashGate)
+    this.gateFx = [];
+    this._gateT = 0;
     if (this.boostGates.length) {
       const bg = this.boostGates;
       const upV = new THREE.Vector3(0, 1, 0);
       const accent = new THREE.Color(this.theme.eventB ?? 0xf5d76e);
-      const gFlagMat = new THREE.MeshLambertMaterial({ color: accent, emissive: accent.clone().multiplyScalar(0.4), side: THREE.DoubleSide });
+      // white base with the accent as the instance colour, so a flash is
+      // just the instance colour lifting to white
+      const gFlagMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: accent.clone().multiplyScalar(0.35), side: THREE.DoubleSide });
       const gPoles = new THREE.InstancedMesh(poleGeo, poleMat, bg.length * 2);
       const gFlags = new THREE.InstancedMesh(flagGeo, gFlagMat, bg.length * 2);
-      // one chevron strip, unit half-width, apex pointing downhill (-z)
-      const chevron = (W) => {
-        const H = 1.4; // apex ahead of the arm tips
-        const T = 0.42; // strip thickness
-        const sh = new THREE.Shape();
-        sh.moveTo(-W, 0);
-        sh.lineTo(0, H);
-        sh.lineTo(W, 0);
-        sh.lineTo(W, -T);
-        sh.lineTo(0, H - T);
-        sh.lineTo(-W, -T);
-        sh.closePath();
-        const geo = new THREE.ShapeGeometry(sh);
-        geo.rotateX(-Math.PI / 2); // shape +y -> world -z (downhill)
+      this._gateFlags = gFlags;
+      this._gateAccent = accent;
+      // a chevron ribbon: two arms from the tips (±W, uphill) to the apex
+      // (downhill), each a run of quads whose corners are dropped onto the
+      // snow — thickness T measured along the fall line
+      const H = 1.4;
+      const T = 0.42;
+      const SEG = 6;
+      const ribbon = (cx, cs, W, zOff) => {
+        const verts = [];
+        const idx = [];
+        for (const side of [-1, 1]) {
+          const base = verts.length / 3;
+          for (let k = 0; k <= SEG; k++) {
+            const u = k / SEG; // tip -> apex
+            const x = cx + side * W * (1 - u);
+            const s = cs + zOff + H * u; // downhill is +s
+            for (const dz of [0, T]) {
+              const ss = s - dz; // the strip's uphill edge
+              verts.push(x, this.heightAt(x, -ss) + 0.07, -ss);
+            }
+          }
+          for (let k = 0; k < SEG; k++) {
+            const a = base + k * 2;
+            // wound so the face is up on either arm
+            if (side < 0) idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+            else idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        geo.setIndex(idx);
         return geo;
       };
-      const chevGeo = [chevron(1), chevron(1)];
-      chevGeo[1].translate(0, 0, 1.0); // the trailing chevron sits uphill of the lead
-      for (const cg of chevGeo) {
-        const mat = new THREE.MeshBasicMaterial({
-          color: 0x38bdf8, transparent: true, opacity: 0.95, depthWrite: false,
-          polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-        });
-        this.gateMats.push(mat);
-        const strips = new THREE.InstancedMesh(cg, mat, bg.length);
-        bg.forEach((g, i) => {
-          q.setFromUnitVectors(upV, this.normalAt(g.x, -g.s));
-          m.compose(new THREE.Vector3(g.x, this.heightAt(g.x, -g.s) + 0.06, -g.s + 0.3), q, sc.set(g.w - 0.35, 1, 1));
-          strips.setMatrixAt(i, m);
-        });
-        group.add(strips);
-      }
       bg.forEach((g, i) => {
+        const mats = [];
+        for (const zOff of [0, -1.0]) {
+          // the lead chevron straddles the gate line, the trailing one sits a metre uphill
+          const mat = new THREE.MeshBasicMaterial({
+            color: 0x38bdf8, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide,
+            polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+          });
+          mats.push(mat);
+          group.add(new THREE.Mesh(ribbon(g.x, g.s - 0.3, g.w - 0.35, zOff), mat));
+        }
+        this.gateFx.push({ mats, flash: -1 });
         for (const [k, side] of [[0, -1], [1, 1]]) {
           const x = g.x + side * g.w;
           const z = -g.s;
@@ -1180,20 +1198,47 @@ export class Terrain {
           gPoles.setMatrixAt(i * 2 + k, m);
           m.compose(pos, q.setFromAxisAngle(upV, side < 0 ? Math.PI : 0), sc.set(1, 1, 1)); // flags fly outward
           gFlags.setMatrixAt(i * 2 + k, m);
+          gFlags.setColorAt(i * 2 + k, accent);
         }
       });
       group.add(gPoles, gFlags);
     }
   }
 
-  /** The gate chevrons flash in alternation — a chase running downhill. */
+  /**
+   * The gate chevrons flash in alternation — a chase running downhill —
+   * and a threaded gate flares white, flags included, for most of a second.
+   */
   pulseGates(t) {
-    if (!this.gateMats) return;
-    for (const [i, mat] of this.gateMats.entries()) {
-      // lead chevron peaks first, trailing one half a beat behind
-      const pulse = 0.5 + 0.5 * Math.sin(t * 7 + i * Math.PI);
-      mat.color.setHSL(0.55, 0.95, 0.45 + pulse * 0.45); // cyan to near-white
+    if (!this.gateFx) return;
+    this._gateT = t;
+    let flagsDirty = false;
+    let hottest = 0;
+    const white = new THREE.Color(0xffffff);
+    for (const [i, fx] of this.gateFx.entries()) {
+      const flare = fx.flash >= 0 ? Math.max(0, 1 - (t - fx.flash) / 0.9) : 0;
+      hottest = Math.max(hottest, flare);
+      for (const [k, mat] of fx.mats.entries()) {
+        // lead chevron peaks first, trailing one half a beat behind
+        const pulse = 0.5 + 0.5 * Math.sin(t * 7 + k * Math.PI);
+        mat.color.setHSL(0.55, 0.95, 0.45 + pulse * 0.45).lerp(white, flare);
+      }
+      if (flare > 0 || fx.wasFlaring) {
+        for (const j of [i * 2, i * 2 + 1]) this._gateFlags.setColorAt(j, this._gateAccent.clone().lerp(white, flare));
+        flagsDirty = true;
+        fx.wasFlaring = flare > 0;
+      }
     }
+    if (flagsDirty && this._gateFlags.instanceColor) this._gateFlags.instanceColor.needsUpdate = true;
+    // the flag cloth glows through the flare (the material is shared, but
+    // gates are hundreds of metres apart — only the threaded one is in view)
+    if (flagsDirty) this._gateFlags.material.emissive.copy(this._gateAccent).multiplyScalar(0.35).lerp(white, hottest);
+  }
+
+  /** A rider just threaded this gate: light it up. */
+  flashGate(g) {
+    const i = this.boostGates.indexOf(g);
+    if (i >= 0 && this.gateFx[i]) this.gateFx[i].flash = this._gateT;
   }
 
   _buildGatesAndFinish(group) {

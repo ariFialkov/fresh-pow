@@ -332,6 +332,7 @@ export class Player {
         if (g) {
           this.speed = Math.min(this.speed + 7, 46);
           this._boostT = 1.6;
+          t.flashGate(g);
           if (this.hud) this.hud.trickToast('BOOST!', 'gate threaded');
           if (this.fx) this.fx.burst(this.pos, dir, { count: 60, speed: 5, up: 2, spread: 1.2, size: 0.24 });
         }

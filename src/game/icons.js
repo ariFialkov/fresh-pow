@@ -7,7 +7,7 @@ const svg = (body, vb = '0 0 24 24') =>
 // clutter — a matched pair of skis with curled tips, a plain board with
 // its two bindings, a toboggan side-on
 export const RIDE_ICON = {
-  ski: svg('<path d="M4.5 19.5 L14 5.5 q1.2 -1.6 2.6 -0.6"/><path d="M9 21 L18.5 7 q1.2 -1.6 2.6 -0.6"/>'),
+  ski: svg('<path d="M3.5 10.5 H16.5 q2.2 0 3.8 -2.6"/><path d="M8.5 10.5 v-1.8 h2.4 v1.8"/><path d="M3.5 16.5 H16.5 q2.2 0 3.8 -2.6"/><path d="M8.5 16.5 v-1.8 h2.4 v1.8"/>'),
   board: svg('<g transform="rotate(22 12 12)"><rect x="8.2" y="2.5" width="7.6" height="19" rx="3.8"/><path d="M10.2 8.5 h3.6"/><path d="M10.2 15.5 h3.6"/></g>'),
   sled: svg('<path d="M4 15 h13 a3 3 0 0 0 0 -6"/><path d="M6 15 v-5 h9"/><path d="M4 19 h15"/>'),
 };

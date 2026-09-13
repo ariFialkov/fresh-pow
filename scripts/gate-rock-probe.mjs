@@ -29,7 +29,22 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: 'scratch-gate-a.png' });
 await page.waitForTimeout(230);
 await page.screenshot({ path: 'scratch-gate-b.png' });
-console.log('gate shots');
+// a rider threads it: the whole gate flares
+await page.evaluate(() => { const r = window.__fp.race; r.terrain.flashGate(r.terrain.boostGates[0]); });
+await page.waitForTimeout(60);
+await page.screenshot({ path: 'scratch-gate-flash.png' });
+console.log('gate shots', await page.evaluate(() => {
+  const t = window.__fp.race.terrain;
+  const g = t.boostGates[0];
+  // how far the ribbon vertices sit off the snow, and the worst bump under the old flat plane
+  const n = t.normalAt(g.x, -g.s);
+  let bump = 0;
+  for (let x = -1.8; x <= 1.8; x += 0.3) for (let s = -1.5; s <= 1.2; s += 0.3) {
+    const planeY = t.heightAt(g.x, -g.s) - (n.x * x + n.z * (-s)) / n.y;
+    bump = Math.max(bump, t.heightAt(g.x + x, -(g.s + s)) - planeY);
+  }
+  return { flatPlaneBuriedBy: +bump.toFixed(2), flash: t.gateFx[0].flash >= 0 };
+}));
 
 // the rocks: the hull vs the instanced mesh's actual vertices
 const rock = await page.evaluate(() => {
