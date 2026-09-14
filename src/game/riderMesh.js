@@ -311,12 +311,17 @@ export function createRider(gear, helmetColor, outfit = null) {
 
   // fixed ankle anchors in gearGroup-local space — the bindings. Feet stay
   // exactly here, always (IK solves the legs down to them).
+  // Regular stance: the chest faces +x (the rider's right, looking down
+  // the hill), so the LEFT foot (side -1) is the front foot at the nose and
+  // the right foot rides the tail. Putting the right foot forward under a
+  // +x-facing pelvis crossed the legs — the whole lower body read as
+  // twisted half a turn against the torso.
   const footAnchors = isSled
     ? null
     : isBoard
       ? {
-          1: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: 0.28 }, // front foot, ducked open
-          [-1]: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -0.08 }, // back foot, near flat
+          [-1]: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: 0.28 }, // front foot, ducked open
+          1: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -0.08 }, // back foot, near flat
         }
       : {
           1: { pos: new THREE.Vector3(0.175, 0.2, 0.03), yaw: 0 },
@@ -327,10 +332,11 @@ export function createRider(gear, helmetColor, outfit = null) {
     root, rig, gearGroup, parts, shadow, char, ctl, footAnchors,
     isSled, isBoard, type: gear.type,
     isSaucer: gear.id === 'sled-saucer',
-    // sideways GOOFY stance (chest to the rider's right): braking out of a
-    // left cut puts the back to the mountain, out of a right cut the chest —
-    // the mapping asked of the slide checks. The board itself points dead
-    // forward so its trail leaves straight off the tail.
+    // sideways REGULAR stance (chest to the rider's right, left foot at the
+    // nose): braking out of a left cut puts the back to the mountain, out
+    // of a right cut the chest — the mapping asked of the slide checks. The
+    // board itself points dead forward so its trail leaves straight off
+    // the tail.
     baseBodyYaw: isBoard ? -Math.PI / 2 : 0,
     gearYawBase: 0,
     _brakeSmooth: 0,
@@ -645,7 +651,8 @@ export function setPose(rider, p = {}) {
     // skis pivot across the slope to scrub; the board noses INTO the turn
     // ahead of the body, swinging about the back foot rather than its
     // middle — the nose leads the carve while the tail holds its track
-    const carveYaw = isBoard ? steer * 0.3 * (1 - bk) : 0;
+    // (+yaw swings the nose to -x, the rider's left; a right turn is steer > 0)
+    const carveYaw = isBoard ? -steer * 0.3 * (1 - bk) : 0;
     RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.57 : 1.45) + (isBoard ? carveYaw : steer * -0.12), 12, 0.8);
     if (isBoard) {
       const PIV = 0.42; // pivot near the back binding (+z is the tail)
@@ -770,7 +777,7 @@ export function setPose(rider, p = {}) {
   // gently into every turn.
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8)
     + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
-    + (isBoard ? -0.3 * tuck : 0); // a tucked boarder opens the hips a little toward the nose
+    + (isBoard ? -0.45 * tuck : 0); // a tucked boarder opens the hips toward the nose, so the fold runs down the board
   RY(parts.pelvis, pelvisYaw, 7, 0.7);
   // aero tuck: the fold happens in applySkeleton as a WORLD-frame rotation
   // about the rig's lateral axis (hips + spine chain), because the spine
@@ -778,10 +785,10 @@ export function setPose(rider, p = {}) {
   // the sideways board rider toward his hips' facing instead of downhill
   // the ski tuck folds through the same world-frame mechanism — its local
   // spine pitch was reading as a backward (uphill) lean. The boarder's
-  // tuck is a low crouch with a moderate fold, not a deep bend over the
-  // nose — a body folded hard down the hill while the hips face sideways
-  // read as twisted at the waist.
-  rider.rigFold = tuck * (isBoard ? 0.9 : 1.1) * (1 - knocked);
+  // tuck is the same fold down the length of the board over a low crouch,
+  // with the hips opened toward the nose so it runs along the body rather
+  // than sideways across it.
+  rider.rigFold = tuck * (isBoard ? 1.25 : 1.1) * (1 - knocked);
 
   // the landing brace: knees soak the hit (kneeGround), and the rest of the
   // body reacts too — the torso folds forward over the compression, the
@@ -790,7 +797,10 @@ export function setPose(rider, p = {}) {
   const brace = Math.max(0, crouch) * (1 - air) * (1 - knocked);
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.3 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
+    // (a positive local pitch reads as a lean BACK on this rig: the tuck's
+    // forward lean comes entirely from the world-frame fold, so the
+    // boarder carries no local tuck pitch at all)
+    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? -0.14 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
       + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (left turn): lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
@@ -805,7 +815,7 @@ export function setPose(rider, p = {}) {
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
   RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
-  RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0.2 : 0.35) + brace * 0.12 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
+  RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0 : 0.35) + brace * 0.12 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
   RZ(parts.chest, steer * (isBoard ? -0.12 : 0.04) + swayA * 0.5, 8.5, 0.6);
   // a tucked boarder's shoulders open down the line with the head
   RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + (isBoard ? tuck * 0.35 : 0) + twist * 0.5 * air, 8.5, 0.6);
