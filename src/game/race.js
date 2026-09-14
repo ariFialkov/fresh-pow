@@ -10,7 +10,7 @@ import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { SprayPool, GearTrails } from './snowfx.js';
 import { StartGate } from './startgate.js';
-import { mulberry32, smoothstep } from './rng.js';
+import { mulberry32 } from './rng.js';
 import { drawOutcome, multiplierFor, EVENTS } from './rtp.js';
 import { THEMES } from './themes.js';
 import { Animals } from './animals.js';
@@ -18,6 +18,33 @@ import { state, save } from './state.js';
 
 // style points for flattening a rider in the combined
 const KNOCKDOWN_PTS = 150;
+
+/**
+ * Who crosses the line where. Outside the combined that is the draw
+ * itself. In the combined a rider drawn ahead of the player may cross
+ * behind (the sheet gives them the style to make it up), the groups on
+ * either side of the player are shuffled among themselves, and riders
+ * drawn behind cross behind — until the late review, once the player's
+ * style is known, can afford to let one through.
+ * @returns {{ player: number, bots: number[] }} crossing ranks, bots by index
+ */
+function planCrossing(outcome, rng, format) {
+  const bots = [...outcome.botPositions];
+  if (format.scored !== 'both') return { player: outcome.playerPos, bots };
+  const shuffle = (arr) => arr.sort(() => rng() - 0.5);
+  const aheadIdx = [];
+  const behindIdx = [];
+  bots.forEach((p, i) => (p < outcome.playerPos ? aheadIdx : behindIdx).push(i));
+  const crossAhead = aheadIdx.filter(() => rng() > 0.35);
+  const crossBehind = [...aheadIdx.filter((i) => !crossAhead.includes(i)), ...behindIdx];
+  shuffle(crossAhead);
+  shuffle(crossBehind);
+  const ranks = new Array(bots.length);
+  crossAhead.forEach((i, k) => (ranks[i] = k + 1));
+  const player = crossAhead.length + 1;
+  crossBehind.forEach((i, k) => (ranks[i] = player + 1 + k));
+  return { player, bots: ranks };
+}
 
 export class RaceScene {
   /**
@@ -74,25 +101,36 @@ export class RaceScene {
     this.scene.add(this.player.obj);
     this.playerTrail = new GearTrails(this.scene, this.terrain, opts.gear);
 
+    // the crossing plan: in the combined the line order need not be the
+    // sheet order — some riders race, some ride for style — so the bots'
+    // crossing ranks are shuffled against their drawn placings (the
+    // player's own placing is what pays, and is held either way)
+    const cross = planCrossing(this.outcome, raceRng, this.format);
+    this.playerCross = cross.player;
+    this._reviewRng = mulberry32(opts.seed ^ 0x7e1a);
+    this._reviewed = false;
+    this._plans = []; // course positions of obstacles bots have lined up (no two on one spot)
+    this._lastPlanT = -10;
+
     this.bots = opts.bots.map((b, i) => {
-      const rank = this.outcome.botPositions[i];
-      const ahead = rank < this.outcome.playerPos;
-      // race scripts: some riders charge late, some lead early and fade —
-      // volatility theater on top of the deterministic draw
+      const overall = this.outcome.botPositions[i];
+      const rank = cross.bots[i];
+      // race scripts, dealt regardless of the draw: some riders charge
+      // late, some show out front early and fade — the pacing takes care
+      // of where each one ends up
       const roll = raceRng();
-      const script = ahead
-        ? roll < 0.4 ? 'lateCharge' : 'steady'
-        : roll < 0.45 ? 'earlyLead' : 'steady';
+      const script = roll < 0.32 ? 'lateCharge' : roll < 0.64 ? 'earlyLead' : 'steady';
       const bot = new Bot({
         terrain: this.terrain,
         gear: b.gear,
         identity: b.identity,
         seed: (opts.seed % 1000) + i * 97 + raceRng() * 50,
         rank,
-        playerRank: this.outcome.playerPos,
+        overall,
+        playerRank: this.playerCross,
         // tight, strictly ordered gaps (jitter < spacing): photo-finish
         // margins that still cross in the drawn order
-        finalGap: Math.abs(rank - this.outcome.playerPos) * 4.5 + 2 + raceRng() * 2.5,
+        finalGap: Math.abs(rank - this.playerCross) * 4.5 + 2 + raceRng() * 2.5,
         script,
         lane: this.terrain.gateLanes[b.lane],
       });
@@ -184,6 +222,10 @@ export class RaceScene {
       }
       if (!this.solo) {
         this._resolveRiderCollisions(dt);
+        // combined: once the player's style is known, settle who crosses
+        // where — and whether a rider drawn behind can afford to beat them
+        // to the line
+        if (!this._reviewed && this.format.scored === 'both' && this.player.progress > this.terrain.length - 340) this._reviewCrossing();
         this._enforceDrawnOrder(dt);
       }
 
@@ -203,7 +245,7 @@ export class RaceScene {
     // alone orders the judges' sheet
     const L = this.terrain.length;
     for (const b of this.bots) {
-      b.style = liveBotStyle(this.player.style, this.outcome.playerPos - b.rank, b.d / L);
+      b.style = liveBotStyle(this.player.style, this.outcome.playerPos - b.overall, b.d / L);
     }
     // live standings: race order by distance, or the judges' running tally
     // for the style formats (ties broken by the draw)
@@ -339,11 +381,54 @@ export class RaceScene {
     if (!this.player.finished) {
       // same progressive ceiling the bots use themselves — never a snap-back
       const L = this.terrain.length;
-      const allowance = 38 * (1 - smoothstep(L - 260, L - 130, playerD));
       for (const b of active) {
-        if (!b.ahead) b.d = Math.min(b.d, Math.max(playerD - 4 + allowance, 2), L - 55);
+        if (!b.ahead) b.d = Math.min(b.d, Math.max(playerD - b.finalGap + b.allowance(L, playerD), 2), L - 55);
       }
     }
+  }
+
+  /**
+   * Combined only, once, on the run-in: the sheet ranks on time points plus
+   * style, so the line order can differ from the drawn order as long as
+   * style can make up the difference. Riders drawn ahead who were set to
+   * cross behind stay that way (they get the style) — unless the player has
+   * none, when the sheet has to be the line order and they go back in
+   * front. A rider drawn behind may be let through to beat the player to
+   * the line only when the player's banked style clearly covers the
+   * placing that costs.
+   */
+  _reviewCrossing() {
+    this._reviewed = true;
+    const rng = this._reviewRng;
+    const S = this.player.style;
+    const playerD = this.player.progress;
+    let aheadSet = this.bots.filter((b) => b.ahead);
+    if (S <= 0) {
+      aheadSet = this.bots.filter((b) => b.overall < this.outcome.playerPos);
+    } else {
+      const promotable = this.bots
+        .filter((b) => !b.ahead && b.overall > this.outcome.playerPos && b.d > playerD - 45)
+        .sort(() => rng() - 0.5);
+      let k = 0;
+      for (const b of promotable) {
+        if (k >= 2 || S < 1500 * (k + 1) + 800) break;
+        if (rng() < 0.45) {
+          aheadSet.push(b);
+          k++;
+        }
+      }
+    }
+    // re-rank: the ahead group keeps its order, newcomers join at its back
+    aheadSet.sort((a, b) => a.rank - b.rank);
+    const behindSet = this.bots.filter((b) => !aheadSet.includes(b)).sort((a, b) => a.rank - b.rank);
+    const playerCross = aheadSet.length + 1;
+    aheadSet.forEach((b, k) => (b.rank = k + 1));
+    behindSet.forEach((b, k) => (b.rank = playerCross + 1 + k));
+    for (const b of this.bots) {
+      b.playerRank = playerCross;
+      b.finalGap = Math.abs(b.rank - playerCross) * 4.5 + 2 + rng() * 2.5;
+    }
+    this.playerCross = playerCross;
   }
 
   _finish() {
@@ -361,13 +446,13 @@ export class RaceScene {
       playerPos,
       playerStyle: this.player.style,
       playerTime: this.playerClock ?? this.time - this.goTime,
-      bots: this.bots.map((b) => ({ rank: b.rank, time: this.solo ? null : (b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed)) - this.goTime })),
+      bots: this.bots.map((b) => ({ rank: b.overall, time: this.solo ? null : (b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed)) - this.goTime })),
       rng: mulberry32(this.terrain.seed ^ 0x5c0e),
     });
-    for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.rank).style;
+    for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.overall).style;
     const rows = [
       { pos: playerPos, name: 'You', color: 0xfbbf24, me: true, mult: multiplierFor(playerPos, this.event.table), score: scores.player },
-      ...this.bots.map((b) => ({ pos: b.rank, name: b.identity.name, color: b.identity.color, me: false, score: scores.bots.find((r) => r.rank === b.rank) })),
+      ...this.bots.map((b) => ({ pos: b.overall, name: b.identity.name, color: b.identity.color, me: false, score: scores.bots.find((r) => r.rank === b.overall) })),
     ].sort((a, b) => a.pos - b.pos);
 
     if (this._resultsShown) return;

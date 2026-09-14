@@ -103,21 +103,24 @@ export function settleScores(format, { playerPos, playerStyle, playerTime, bots,
     const step = 1.4 + rng() * 1.2;
     return Math.max(5, playerTime - k * step + (rng() - 0.5) * 0.6 * step);
   });
-  // the clock must agree with the draw: riders still on course when the
-  // player crossed have their finish projected at their current pace, and
-  // two projections can land a hair out of order — walk the field away
-  // from the player in both directions, keeping every rider a beat behind
-  // the one drawn ahead
-  const byRank = bots.map((b, i) => ({ rank: b.rank, i })).sort((a, b) => a.rank - b.rank);
-  let prev = playerTime;
-  for (const r of byRank.filter((r) => r.rank > playerPos)) {
-    times[r.i] = Math.max(times[r.i], prev + 0.12);
-    prev = times[r.i];
-  }
-  let next = playerTime;
-  for (const r of byRank.filter((r) => r.rank < playerPos).reverse()) {
-    times[r.i] = Math.max(5, Math.min(times[r.i], next - 0.12));
-    next = times[r.i];
+  // in the time formats the clock must agree with the draw: riders still
+  // on course when the player crossed have their finish projected at their
+  // current pace, and two projections can land a hair out of order — walk
+  // the field away from the player in both directions, keeping every rider
+  // a beat behind the one drawn ahead. (The combined ranks on the total,
+  // and its line order is deliberately not the sheet order.)
+  if (scored !== 'both') {
+    const byRank = bots.map((b, i) => ({ rank: b.rank, i })).sort((a, b) => a.rank - b.rank);
+    let prev = playerTime;
+    for (const r of byRank.filter((r) => r.rank > playerPos)) {
+      times[r.i] = Math.max(times[r.i], prev + 0.12);
+      prev = times[r.i];
+    }
+    let next = playerTime;
+    for (const r of byRank.filter((r) => r.rank < playerPos).reverse()) {
+      times[r.i] = Math.max(5, Math.min(times[r.i], next - 0.12));
+      next = times[r.i];
+    }
   }
   const timePts = scored === 'both' ? timePointsFor([playerTime, ...times]) : [playerTime, ...times].map(() => 0);
   const pTime = timePts[0];
@@ -147,13 +150,25 @@ export function settleScores(format, { playerPos, playerStyle, playerTime, bots,
     return { rank: b.rank, time, timePts: bTime, style, total };
   });
   if (scored === 'both') {
-    // the combined sheet must rank in the drawn order: walk down from the
-    // player trimming any rider behind who came out too high, then up from
-    // the player lifting any rider ahead who came out too low
+    // the combined sheet must rank in the drawn order, and the line order
+    // need not match it: a rider drawn ahead of another may have crossed
+    // well behind them, so style has to carry the difference. Behind the
+    // player: raise from the back so each rider beats the one drawn behind
+    // (style is unbounded above), then cap from the player down so nobody
+    // reaches the player's total (style never below zero). Ahead of the
+    // player: lift each rider clear of the one drawn behind.
     const step = Math.max(20, Math.round(0.03 * pTotal));
     const ranked = [...rows].sort((a, b) => a.rank - b.rank);
+    const behind = ranked.filter((r) => r.rank > playerPos);
+    for (let i = behind.length - 2; i >= 0; i--) {
+      const need = behind[i + 1].total + step;
+      if (behind[i].total < need) {
+        behind[i].style = need - behind[i].timePts;
+        behind[i].total = need;
+      }
+    }
     let ceiling = pTotal;
-    for (const r of ranked.filter((r) => r.rank > playerPos)) {
+    for (const r of behind) {
       if (r.total > ceiling - step) {
         r.style = Math.max(0, ceiling - step - r.timePts);
         r.total = r.timePts + r.style;

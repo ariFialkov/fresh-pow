@@ -39,7 +39,8 @@ const putBotOnPlayer = (mode) => page.evaluate((m) => {
   // onto its line over the first 85 m (same math as Bot.update)
   let u = Math.min(1, Math.max(0, (bot.d - 6) / 79));
   u = u * u * (3 - 2 * u);
-  race.player.pos.x = bot.lane.x + (bot.lineAt(bot.d) - bot.lane.x) * u;
+  race.player.pos.x = bot.lane.x + (bot.pathAt(bot.d) - bot.lane.x) * u;
+  bot.plan = null; // no fall lined up: the line must stay put for the shove
   bot._pushX = 0;
   bot._aggroBlend = 0;
   bot._collideCd = 0;

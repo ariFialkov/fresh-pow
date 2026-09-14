@@ -7,7 +7,8 @@ const port = Number(process.env.PORT || 4189);
 const server = await preview({ preview: { port, strictPort: true } });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
-await page.goto(`http://localhost:${port}/`);
+page.on('pageerror', (e) => console.error('pageerror:', e));
+await page.goto(`http://localhost:${port}/?format=race`); // a race with the field on the hill, no roller
 for (let tries = 0; ; tries++) {
   await page.waitForFunction(() => { const b = document.querySelector('#start-btn'); return b && !b.disabled; }, undefined, { timeout: 120000 });
   await page.click('#start-btn');
