@@ -443,11 +443,13 @@ function applySkeleton(rider) {
 
     // ---- standing riders: two-bone leg IK pins each ankle to its binding
     // anchor on the gear — the feet never wiggle, whatever the body does ----
-    // knees aim between the board nose and the hips' facing
-    const kneeYaw = (P.pelvis.rotation.y || 0) * 0.55 + gg.rotation.y * 0.45;
+    // knees aim between the board nose and the hips' facing (skiers add a
+    // per-leg drive into the turn, see setPose)
+    const kneeYawBase = (P.pelvis.rotation.y || 0) * 0.55 + gg.rotation.y * 0.45;
     for (const s of [-1, 1]) {
       const ik = ctl.ik[s];
       const anchor = rider.footAnchors[s];
+      const kneeYaw = kneeYawBase + (rider.kneeKick ? rider.kneeKick[s] : 0);
       // anchor -> world through the gear's live transform
       _tW.copy(anchor.pos).applyQuaternion(gg.quaternion).add(gg.position);
       rider.rig.localToWorld(_tW);
@@ -522,6 +524,22 @@ function applySkeleton(rider) {
 
 // ---------------------------------------------------------------- pose ----
 // ---------------------------------------------------------------- pose ----
+
+/**
+ * The knee compression of a landing over the seconds since touchdown: a
+ * fast sink into the hit (peaking around a tenth of a second), a slower
+ * push back up, and a small overshoot past standing before settling —
+ * the shape of legs absorbing an impact rather than a switch that decays.
+ * Negative values mean a brief extension past the resting stance.
+ * @param tau seconds since touchdown
+ * @param amp how hard the hit was, 0..1
+ */
+export function landingBrace(tau, amp) {
+  if (tau < 0 || tau > 1.1) return 0;
+  const sink = (1 - Math.exp(-tau / 0.045)) * Math.exp(-tau / 0.3);
+  const rebound = tau > 0.38 && tau < 0.72 ? Math.sin((Math.PI * (tau - 0.38)) / 0.34) * 0.18 : 0;
+  return amp * (sink - rebound);
+}
 
 /**
  * Drives every joint from a handful of gameplay params.
@@ -618,13 +636,22 @@ export function setPose(rider, p = {}) {
   // whole-body edge angle into the turn; braking leans the body over the
   // chosen edge (+z Euler roll tips the body toward -x, the toe side of the
   // regular stance); knocked riders lie on their side
+  // (skiers roll the whole body less — most of their turn is angulation,
+  // the hips and knees driving into the carve under an upright torso)
   const brakeLean = isSled ? 0 : bk * (rider._edgeLean ?? 1) * 0.42;
-  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.42) * (1 - tuck * 0.25) * (1 - bk * 0.6) + brakeLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
+  RZ(rider.rig, -steer * (isSled ? 0.28 : isBoard ? 0.58 : 0.24) * (1 - tuck * 0.25) * (1 - bk * 0.6) + brakeLean + wobS * 0.4 + swayB * 0.4 + knocked * rider._brakeSide * 1.35, 6.5, 0.6);
 
   if (!isSled) {
-    // skis pivot across the slope to scrub; the board instead noses INTO the
-    // turn slightly ahead of the body, so the deck reads as leading the carve
-    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.57 : 1.45) + steer * (isBoard ? 0.16 : -0.12), 12, 0.8);
+    // skis pivot across the slope to scrub; the board noses INTO the turn
+    // ahead of the body, swinging about the back foot rather than its
+    // middle — the nose leads the carve while the tail holds its track
+    const carveYaw = isBoard ? steer * 0.3 * (1 - bk) : 0;
+    RY(rider.gearGroup, rider.gearYawBase + bkYaw * (isBoard ? 1.57 : 1.45) + (isBoard ? carveYaw : steer * -0.12), 12, 0.8);
+    if (isBoard) {
+      const PIV = 0.42; // pivot near the back binding (+z is the tail)
+      PX(rider.gearGroup, -Math.sin(carveYaw) * PIV, 12, 0.8);
+      PZ(rider.gearGroup, PIV * (1 - Math.cos(carveYaw)), 12, 0.8);
+    }
     // The body's roll is about the RIG's forward axis; once the gear has
     // swung toward perpendicular that roll geometrically turns into fore-aft
     // PITCH on the deck — which is why a checked board used to nose into the
@@ -718,7 +745,7 @@ export function setPose(rider, p = {}) {
   // tucks, never as a resting crouch; airborne legs stay floaty, not balled.
   const kneeGround = idle
     ? (isBoard ? 0.2 : 0.14) + breathe * 0.03
-    : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.2 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
+    : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.42 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
   const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25) * air;
 
   // the legs are IK-solved to the binding anchors (applySkeleton); the pose
@@ -731,25 +758,39 @@ export function setPose(rider, p = {}) {
   PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.03 : 0) - air * 0.12 - knocked * 0.35);
   // center of gravity slides fore/aft over the deck with the weight shift
   PZ(parts.pelvis, -shift * 0.11);
+  // ski angulation: the hips slide INTO the turn over the inside ski, which
+  // (with the feet pinned) folds the inside knee and stretches the outside
+  // leg long — the shape of a real carve, instead of a stiff whole-body
+  // lean. Scales with how hard the turn is loaded.
+  const angulate = rider.type === 'ski' && !idle ? steer * (1 - tuck) * (1 - air) * (1 - bk) : 0;
+  PX(parts.pelvis, angulate * 0.09, 11, 0.8);
   // hips flow with the turn on a lazy spring — the twist "catches up" the
   // torso rather than snapping with it. Board heelside carves open the hips
   // toward the fall line (that laid-back backside look); ski hips swing
   // gently into every turn.
   const pelvisYaw = rider.baseBodyYaw + bkYaw * (isBoard ? 0.5 : 0.8)
     + (isBoard ? Math.min(0, steer) * 0.5 : steer * 0.42) * (1 - tuck)
-    + (isBoard ? -0.5 * tuck : 0); // a tucked boarder squares up toward travel to fold low over the nose
+    + (isBoard ? -0.3 * tuck : 0); // a tucked boarder opens the hips a little toward the nose
   RY(parts.pelvis, pelvisYaw, 7, 0.7);
   // aero tuck: the fold happens in applySkeleton as a WORLD-frame rotation
   // about the rig's lateral axis (hips + spine chain), because the spine
   // bones hang under the yawed pelvis and any local-axis pitch would bend
   // the sideways board rider toward his hips' facing instead of downhill
   // the ski tuck folds through the same world-frame mechanism — its local
-  // spine pitch was reading as a backward (uphill) lean
-  rider.rigFold = tuck * (isBoard ? 1.5 : 1.1) * (1 - knocked);
+  // spine pitch was reading as a backward (uphill) lean. The boarder's
+  // tuck is a low crouch with a moderate fold, not a deep bend over the
+  // nose — a body folded hard down the hill while the hips face sideways
+  // read as twisted at the waist.
+  rider.rigFold = tuck * (isBoard ? 0.9 : 1.1) * (1 - knocked);
 
+  // the landing brace: knees soak the hit (kneeGround), and the rest of the
+  // body reacts too — the torso folds forward over the compression, the
+  // head stays up, the arms come forward/out for balance. Off the ground
+  // the crouch is only a trick-curl cue.
+  const brace = Math.max(0, crouch) * (1 - air) * (1 - knocked);
   const spineGround = idle
     ? 0.05 + breathe * 0.015
-    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.15 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
+    : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? 0.3 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
       + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (left turn): lean back casual
   const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
@@ -757,21 +798,32 @@ export function setPose(rider, p = {}) {
   // acceleration G presses the body upright/back — but a tucked rider is
   // braced hard forward, so the tuck largely overrides that press
   const gBrace = 1 - tuck * 0.8;
-  RX(parts.spine, spineBase * 0.45 + wobS * 0.5 + longG * -0.28 * gBrace + swayB * 0.4, 9, 0.65);
-  RZ(parts.spine, -steer * 0.12 + wobS * 0.3 + swayA * 0.6, 9, 0.65);
+  RX(parts.spine, spineBase * 0.45 + brace * 0.26 + wobS * 0.5 + longG * -0.28 * gBrace + swayB * 0.4, 9, 0.65);
+  // skiers angulate: the torso stays upright over the driven hips, so its
+  // roll runs slightly AGAINST the lean; boarders bank with the body
+  RZ(parts.spine, steer * (isBoard ? -0.12 : 0.08) + wobS * 0.3 + swayA * 0.6, 9, 0.65);
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
   RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
-  RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0.1 : 0.35) + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
-  RZ(parts.chest, -steer * 0.12 + swayA * 0.5, 8.5, 0.6);
-  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + twist * 0.5 * air, 8.5, 0.6);
+  RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0.2 : 0.35) + brace * 0.12 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
+  RZ(parts.chest, steer * (isBoard ? -0.12 : 0.04) + swayA * 0.5, 8.5, 0.6);
+  // a tucked boarder's shoulders open down the line with the head
+  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + (isBoard ? tuck * 0.35 : 0) + twist * 0.5 * air, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
-  RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 + longG * 0.3, 6.5, 0.48);
+  RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 - brace * 0.22 + longG * 0.3, 6.5, 0.48);
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
   RY(parts.neck, -pelvisYaw * (isBoard ? 0.72 : 0.45) - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
 
-  // (legs: nothing to drive here — applySkeleton IK-solves them down to the
-  // binding anchors from the pelvis the springs above just placed)
+  // (legs: applySkeleton IK-solves them down to the binding anchors from
+  // the pelvis the springs above just placed; skiers additionally drive
+  // both knees toward the inside of the turn — the inside knee most — the
+  // way the legs actually angulate under a carve)
+  if (!rider.kneeKick) rider.kneeKick = { [-1]: 0, [1]: 0 };
+  for (const s of [-1, 1]) {
+    const inside = s * angulate > 0;
+    const want = -angulate * (inside ? 0.5 : 0.22);
+    rider.kneeKick[s] += (want - rider.kneeKick[s]) * Math.min(1, dt * 9);
+  }
 
   // ---- pole plants: entering a carve, the inside arm punches forward and
   // stabs the pole, then recovers. Detected off the lean crossing into a
@@ -819,11 +871,15 @@ export function setPose(rider, p = {}) {
       sx = 0.12; sz = arm.side * 0.16; ex = 0.35 + swayB * 0.3; wx = -0.15;
     } else if (isBoard) {
       // balance arms working the carve: inside elbow folds, outside reaches;
-      // a tuck sweeps both arms straight back along the body
-      sx = mix(0.2 + wobA + bk * -0.3 + steer * arm.side * 0.25, -0.72 + wobA * 0.5, tuck);
-      sz = mix(arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45, arm.side * 0.15, tuck);
-      ex = mix(0.5 + inside * 0.55 + swayB * 0.35, 0.18, tuck);
-      wx = arm.side * steer * 0.2;
+      // a tuck sweeps both arms straight back and a little out behind the
+      // body, elbows locked — the speed-run stance
+      sx = mix(0.2 + wobA + bk * -0.3 + steer * arm.side * 0.25, -1.05 + wobA * 0.5, tuck);
+      sz = mix(arm.side * (0.55 + steer * arm.side * 0.3) + bk * arm.side * 0.45, arm.side * 0.32, tuck);
+      ex = mix(0.5 + inside * 0.55 + swayB * 0.35, 0.1, tuck);
+      wx = arm.side * steer * 0.2 * (1 - tuck);
+      // bracing a landing: arms come out wide for balance
+      sz += arm.side * brace * 0.35;
+      ex = mix(ex, 0.3, brace * 0.5);
       if (arm.side < 0 && fsDrag > 0) { // regular: the trailing mitt is the left hand
         // trailing mitt drops toward the snow on the toeside lean
         sx = mix(sx, 0.5, fsDrag);
@@ -842,6 +898,9 @@ export function setPose(rider, p = {}) {
       sz = mix(arm.side * (0.3 + bk * 0.5), arm.side * 0.1, tuck) + outR * arm.side * 0.6;
       ex = mix(0.72 + inside * 0.5 + swayB * 0.3, 0.15, tuck) - punch * 0.55 + trail * 0.15;
       wx = mix(0.35 - bk * 0.5, 0.05, tuck) - punch * 0.85 + trail * 0.3;
+      // bracing a landing: hands punch forward and a touch out
+      sx += brace * 0.35;
+      sz += arm.side * brace * 0.2;
     }
     // airborne arms: spread for balance, whip TOWARD the spin to feed it,
     // pull in as it winds up (skater physics), flare back out as it dies,

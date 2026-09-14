@@ -2,7 +2,7 @@
 // Skill here changes how the run FEELS — speed, style, stumbles — but never the
 // betting result: bots pace themselves around whatever the player does.
 import * as THREE from 'three';
-import { createRider, setPose } from './riderMesh.js';
+import { createRider, setPose, landingBrace } from './riderMesh.js';
 import { tubeRadii, rockPenetration } from './terrain.js';
 import { clamp, lerp } from './rng.js';
 
@@ -41,6 +41,8 @@ export class Player {
     this.finished = false;
     this.groundVy = 0; // smoothed terrain vertical rate -> launch impulse
     this.landComp = 0; // knee compression after landings
+    this._landT = -1; // seconds since touchdown while the brace plays
+    this._landAmp = 0;
     this.fx = null; // SprayPool, wired up by the race scene
     this.t = 0;
     this.knockT = 0; // knocked-flat timer after rider collisions
@@ -121,7 +123,12 @@ export class Player {
     if (this.stumbleT > 0) this.stumbleT -= dt;
     if (this._boostT > 0) this._boostT -= dt;
     const prevS = this.progress;
-    this.landComp = Math.max(0, this.landComp - dt * 2.6);
+    // the landing brace runs its course from touchdown: sink, push, settle
+    if (this._landT >= 0) {
+      this._landT += dt;
+      this.landComp = landingBrace(this._landT, this._landAmp);
+      if (this._landT > 1.1) this._landT = -1;
+    }
 
     // ---- steering: three distinct feels ----
     // Sleds: point-and-slide, loose and reactive (they have no edge).
@@ -381,7 +388,8 @@ export class Player {
         const flipLeft = Math.abs(this.trickFlip - this.flipDone);
         const sloppy = spinLeft > 0.9 || flipLeft > 0.9;
         const impact = Math.min(1, -this.vy / 14);
-        this.landComp = 0.4 + impact * 0.6;
+        this._landT = 0;
+        this._landAmp = 0.45 + impact * 0.55;
         if (this.fx) {
           this.fx.burst(this.pos, dir, {
             count: 32 + Math.round(impact * 80),
@@ -492,7 +500,7 @@ export class Player {
       stumble: this.stumbleT > 0 ? 1 : 0,
       knocked,
       airborne: this.airborne,
-      crouch: clamp(this.landComp + this.bump, 0, 1),
+      crouch: clamp(this.landComp + this.bump, -0.2, 1), // a little negative: the rebound past standing
       speedNorm: clamp(this.speed / 26, 0, 1),
       longG: clamp(this.longA / 11, -1, 1),
       jolt: this.bump * 1.3,

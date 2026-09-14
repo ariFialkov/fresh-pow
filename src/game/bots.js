@@ -8,7 +8,7 @@
 //   * a bot destined to finish BEHIND never crosses before the player
 //   * a bot destined to finish AHEAD always reaches the line first
 import * as THREE from 'three';
-import { createRider, setPose } from './riderMesh.js';
+import { createRider, setPose, landingBrace } from './riderMesh.js';
 import { COURSE } from './terrain.js';
 import { noise1, clamp, lerp, smoothstep } from './rng.js';
 
@@ -30,6 +30,8 @@ export class Bot {
     this.speed = 0;
     this.y = 0;
     this.vFall = 0;
+    this._landT = -1; // seconds since touchdown while the landing brace plays
+    this._landAmp = 0;
     this.frozen = true;
     this.finished = false;
     this.finishTime = null;
@@ -189,6 +191,7 @@ export class Bot {
     x = lerp(this.lane.x, x, smoothstep(6, 85, this.d));
     const z = -this.d;
     const ground = this.terrain.groundAt(x, z);
+    const fallV = this.vFall; // how hard a landing this frame would hit
     if (ground <= this.y) {
       // falling / flying off drops
       this.vFall += 16 * dt;
@@ -198,10 +201,18 @@ export class Bot {
       this.vFall = 0;
     }
     const airborne = this.y > ground + 0.2;
-    if (this._wasAirborne && !airborne && race.fx) {
-      race.fx.burst(this.obj.position, { x: 0, z: -1 }, { count: 14, speed: 4, up: 3, spread: 1.6, size: 1.2 });
+    if (this._wasAirborne && !airborne) {
+      if (race.fx) race.fx.burst(this.obj.position, { x: 0, z: -1 }, { count: 14, speed: 4, up: 3, spread: 1.6, size: 1.2 });
+      this._landT = 0;
+      this._landAmp = 0.4 + Math.min(1, fallV / 12) * 0.5;
     }
     this._wasAirborne = airborne;
+    let crouch = 0;
+    if (this._landT >= 0) {
+      this._landT += dt;
+      crouch = landingBrace(this._landT, this._landAmp);
+      if (this._landT > 1.1) this._landT = -1;
+    }
 
     this.obj.position.set(x, this.y, z);
     if (!airborne) this.obj.position.y += 0.09;
@@ -235,6 +246,7 @@ export class Bot {
         stumble: this.stumbleT > 0 ? 1 : 0,
         knocked,
         airborne,
+        crouch,
         speedNorm: clamp(this.speed / 26, 0, 1),
         longG: clamp((this._longA ?? 0) / 11, -1, 1),
         t: this._t + this.weavePhase,
