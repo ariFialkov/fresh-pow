@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mulberry32 } from './rng.js';
+import { modelURL } from './assets.js';
 import { COURSE } from './terrain.js';
 import { Trail } from './snowfx.js';
 
@@ -18,7 +19,7 @@ export async function loadAnimals() {
   try {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
-    const gltf = await loader.loadAsync('models/animals.glb');
+    const gltf = await loader.loadAsync(modelURL('animals'));
     animalRoot = gltf.scene;
     animalRoot.traverse((o) => {
       if (o.isMesh) {

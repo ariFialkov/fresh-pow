@@ -97,6 +97,23 @@ after first load (shell precache + cache-first runtime caching of hashed assets)
 `dist/` folder to any static host — the base path is relative, so sub-path hosting (e.g.
 GitHub Pages) works out of the box.
 
+### Hosts that reject `.glb`
+
+Some upload targets vet files by extension and refuse `.glb`. The models are glTF binaries
+and `GLTFLoader` identifies them by their magic bytes rather than their name, so they can be
+served under any extension the host accepts:
+
+```bash
+VITE_MODEL_EXT=bin npm run build   # dist/models/props.bin, loaded as glTF
+```
+
+The build renames what it emits and `src/game/assets.js` builds matching URLs, so the two
+never drift. Converting to FBX is not an option: the format cannot carry the meshopt
+compression or packed textures these files rely on, and the assets would grow roughly
+tenfold. The `.fbx` files under `public/models` are the originals the `tools/*.html`
+converters read during development; nothing loads them at runtime and the build leaves them
+out of `dist/`.
+
 ## Architecture
 
 ```

@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { modelURL } from './assets.js';
 
 let propRoot = null;
 
@@ -13,7 +14,7 @@ export async function loadProps() {
   if (propRoot) return;
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync('models/props.glb');
+  const gltf = await loader.loadAsync(modelURL('props'));
   propRoot = gltf.scene;
 }
 

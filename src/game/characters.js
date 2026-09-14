@@ -16,6 +16,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { mulberry32 } from './rng.js';
+import { modelURL } from './assets.js';
 
 export const MODEL_SCALE = 0.0105; // model cm -> world meters (~1.78 m tall)
 
@@ -92,7 +93,7 @@ export async function loadCharacters() {
   await Promise.all(
     Object.keys(CFG).map(async (id) => {
       const [gltf, img] = await Promise.all([
-        loader.loadAsync(`models/${id}.glb`),
+        loader.loadAsync(modelURL(id)),
         new Promise((res, rej) => {
           const im = new Image();
           im.onload = () => res(im);
