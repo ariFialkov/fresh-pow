@@ -77,13 +77,15 @@ function buildGear(gear) {
       ski.rotation.x = Math.PI / 2;
       ski.scale.set(1, 1, 0.22);
       ski.position.set(side, 0.024, 0.05);
-      const tip = mesh(capsule('skitip', 0.062, 0.18), accentMat);
-      tip.rotation.x = Math.PI / 2 - 0.55;
-      tip.scale.set(0.95, 1, 0.3);
-      tip.position.set(side, 0.078, -0.94);
+      // the accent is a topsheet band behind the shovel — flat on the ski,
+      // nothing hovering off the tip
+      const band = mesh(capsule('skiband', 0.05, 0.22), accentMat);
+      band.rotation.x = Math.PI / 2;
+      band.scale.set(1, 1, 0.2);
+      band.position.set(side, 0.036, -0.6);
       const binding = mesh(cached('bind', () => new THREE.BoxGeometry(0.13, 0.08, 0.36)), darkMat);
       binding.position.set(side, 0.05, 0.05);
-      g.add(base, ski, tip, binding);
+      g.add(base, ski, band, binding);
     }
   } else if (gear.type === 'board') {
     const base = mesh(capsule('boardbase', 0.205, 1.32), baseMat);
@@ -108,9 +110,11 @@ function buildGear(gear) {
       g.add(b);
     }
   } else if (gear.id === 'sled-saucer') {
+    // the dish is a lathed shell: one surface, so it is drawn from both
+    // sides — the bowl the rider kneels in and the solid underside
     const dish = mesh(lathe('saucer', [
       [0.0, 0.04], [0.3, 0.05], [0.55, 0.09], [0.7, 0.17], [0.74, 0.24],
-    ], 18), deckMat);
+    ], 18), new THREE.MeshLambertMaterial({ color: gear.deck, side: THREE.DoubleSide }));
     const rim = mesh(cached('srim', () => new THREE.TorusGeometry(0.72, 0.045, 8, 18)), accentMat);
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 0.24;
