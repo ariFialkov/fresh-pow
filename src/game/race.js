@@ -404,7 +404,10 @@ export class RaceScene {
     const playerD = this.player.progress;
     let aheadSet = this.bots.filter((b) => b.ahead);
     if (S <= 0) {
-      aheadSet = this.bots.filter((b) => b.overall < this.outcome.playerPos);
+      // riders drawn ahead go back in front — those close enough to get
+      // there without a snap; one too far back keeps crossing behind and
+      // the sheet gives it the style (the order still holds either way)
+      aheadSet = this.bots.filter((b) => b.overall < this.outcome.playerPos && (b.ahead || b.d > playerD - 45));
     } else {
       const promotable = this.bots
         .filter((b) => !b.ahead && b.overall > this.outcome.playerPos && b.d > playerD - 45)

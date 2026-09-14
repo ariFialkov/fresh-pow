@@ -317,7 +317,9 @@ export class Bot {
       this.d = Math.min(this.d, Math.max(playerD - this.finalGap + this.allowance(L, playerD), 2), L - 55);
       // pinned at the ceiling (a slow player, or one who has stopped): go
       // down rather than hover there in lockstep with them
-      const pinned = before - this.d > 0.15;
+      // (not while parked short of the line waiting for the player: a rider
+      // standing there falling over every few seconds is worse than waiting)
+      const pinned = before - this.d > 0.15 && this.d < L - 70;
       this._holdT = pinned ? this._holdT + dt : 0;
       const patience = race.player.speed < 3 ? 1.2 : 3.5 + this.seedU * 3;
       if (this._holdT > patience && this._washCd <= 0 && this.stumbleT <= 0) {
@@ -331,6 +333,14 @@ export class Bot {
     // even a compressed pack crosses in its drawn order
     if (this.ahead && !playerFinished && !this.finished && playerD > L - 60) {
       this.d = Math.max(this.d, playerD + 2.5 + (this.playerRank - this.rank - 1) * 3);
+    }
+    // a rider the floor just carried over the line has crossed THIS frame,
+    // before the player's own crossing is checked — not next frame, when
+    // the player could already be on the sheet ahead of them
+    if (!this.finished && this.d >= L) {
+      this.finished = true;
+      this.finishTime = race.time;
+      race.onBotFinish(this);
     }
 
     // ---- place on the mountain ----
