@@ -56,15 +56,21 @@ for (const format of formats) {
         let maxJump = 0;
         let jumpWho = '';
         const prevD = r.bots.map((b) => b.d);
+        const prevV = r.bots.map((b) => b.speed);
         const orig = r.update.bind(r);
+        r.update = () => {}; // the page's own loop must not step the race as well
         const t0 = performance.now();
         while (!document.querySelector('#results') && performance.now() - t0 < 240000) {
           for (let i = 0; i < 10; i++) {
             orig(0.05);
             r.bots.forEach((b, j) => {
-              const j1 = b.d - prevD[j];
+              // any move beyond what the rider's own speed (either side of
+              // the tick — a fall cuts it mid-tick) carried it: a clamp at work
+              const j1 = (b.d - prevD[j]) - Math.max(prevV[j], b.speed) * 0.05;
               if (j1 > maxJump) { maxJump = j1; jumpWho = `${b.identity.name}@${Math.round(b.d)}`; }
+              if (j1 > 1.2 && (window.__snaps = window.__snaps || []).length < 6) window.__snaps.push({ who: b.identity.name, from: +prevD[j].toFixed(1), to: +b.d.toFixed(1), vBefore: +prevV[j].toFixed(1), vAfter: +b.speed.toFixed(1), playerD: Math.round(r.player.progress), pv: +r.player.speed.toFixed(1), ahead: b.ahead, rank: b.rank, fin: b.finished, plan: !!b.plan, stumble: +b.stumbleT.toFixed(2) });
               prevD[j] = b.d;
+              prevV[j] = b.speed;
             });
           }
           await new Promise((k) => requestAnimationFrame(k));
@@ -79,7 +85,7 @@ for (const format of formats) {
           crossing: r.finishOrder.map((f) => (f.me ? 'You' : `${f.name}(${r.bots.find((b) => b.identity.name === f.name).rank})`)),
           bigPos: document.querySelector('.big-pos')?.textContent, rows, totals,
           balance: JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance,
-          maxJump: +maxJump.toFixed(1), jumpWho, style: P.style, time: +(r.playerClock ?? 0).toFixed(1),
+          maxJump: +maxJump.toFixed(1), jumpWho, style: P.style, time: +(r.playerClock ?? 0).toFixed(1), snaps: window.__snaps || [],
         };
       }, [SCRIPTS[name].toString(), format === 'combined' && k % 2 ? 1200 : 0]);
       const totals = res.totals;
@@ -88,6 +94,7 @@ for (const format of formats) {
       const ok = res.crossed === res.planned && res.bigPos.startsWith(String(res.drawn)) && ordered && crossOrderOk
         && Math.abs(res.balance - (before - res.bet + res.payout)) < 0.01;
       if (!ok) fails++;
+      if (res.snaps.length) console.log('   snaps:', JSON.stringify(res.snaps));
       console.log(`${ok ? 'OK  ' : 'FAIL'} ${format}/${name}#${k}: drawn ${res.drawn} planned ${res.planned} crossed ${res.crossed} shown ${res.bigPos} time ${res.time}s style ${res.style} maxJump ${res.maxJump} m (${res.jumpWho}) | ${res.crossing.join(' ')}${format === 'combined' ? ` | ${res.rows.join(' | ')}` : ''}`);
     }
   }

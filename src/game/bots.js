@@ -250,6 +250,26 @@ export class Bot {
       else if (vReq < vNat * 0.94) v = Math.max(vReq * 0.97, vNat * 0.5); // running early: ease off
       else v = vNat;
 
+      // the run-in, planned rather than snapped. A rider drawn ahead has a
+      // lead it must hold that ramps in from 450 m out — well behind is
+      // fine early, clear in front by 80 m out — and any shortfall is
+      // closed at a bounded pace, so the pass past the player is a pass.
+      // A rider drawn behind eases toward its ceiling instead of hitting it.
+      if (this.ahead) {
+        const lead = this.d - playerD;
+        const ramp = smoothstep(L - 450, L - 80, playerD);
+        const need = lerp(-70, 2.5 + (this.playerRank - this.rank - 1) * 3 + 6, ramp);
+        const deficit = need - lead;
+        if (ramp > 0 && deficit > 0) {
+          vmax = Math.max(vmax, race.player.speed + 16);
+          v = Math.max(v, race.player.speed + clamp(deficit * 0.8, 2, 16));
+        }
+      } else {
+        const room = playerD - this.finalGap + this.allowance(L, playerD) - this.d;
+        if (room < 12) v = Math.min(v, Math.max(0, race.player.speed + room * 1.2 - 3));
+      }
+      v = Math.min(v, vmax);
+
       // running well early? shed the time like a rider would: line up an
       // obstacle far ahead and go down on it, or — with nothing plausible
       // in reach — wash out on a carve

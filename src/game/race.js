@@ -368,14 +368,22 @@ export class RaceScene {
     if (!near) return;
 
     active.sort((a, b) => a.rank - b.rank); // rank 1 must cross first = largest d
+    const L = this.terrain.length;
     for (let i = active.length - 2; i >= 0; i--) {
       const better = active[i];
       const worse = active[i + 1];
+      const gap = better.d - worse.d;
+      if (gap < 8) {
+        // closing on the rider drawn ahead: ease off, so the order sorts
+        // itself out as a speed difference rather than a shove
+        worse.speed = Math.min(worse.speed, Math.max(0, better.speed - (gap < 2.2 ? 1.5 : 0.5)));
+      }
       const need = worse.d + 2.2 - better.d;
       if (need > 0) {
-        // urgent when the worse-ranked rider is closing on the line
-        const rate = worse.d > this.terrain.length - 25 ? 80 : 18;
-        better.d += Math.min(need, rate * dt);
+        // the better rider gains only what a real overtake could deliver
+        better.d += Math.min(need, 12 * dt);
+        // last resort right at the line: hold the worse one back
+        if (worse.d > L - 20) worse.d = Math.min(worse.d, better.d - 2.2);
       }
     }
     if (!this.player.finished) {
