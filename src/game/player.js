@@ -16,6 +16,8 @@ const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
 const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
+const UP = new THREE.Vector3(0, 1, 0);
+const IDENTITY_Q = new THREE.Quaternion();
 
 export class Player {
   constructor(terrain, gear, input, hud, outfit = null) {
@@ -24,6 +26,20 @@ export class Player {
     this.hud = hud;
     this.rider = createRider(gear, 0xfbbf24, outfit);
     this.obj = this.rider.root;
+    // the player's rider gets its own materials (they are shared per colour
+    // across the field) so it alone can ghost out after a stumble
+    this._mats = [];
+    this.obj.traverse((o) => {
+      if (o.isMesh && o !== this.rider.shadow) {
+        o.material = o.material.clone();
+        this._mats.push(o.material);
+      }
+    });
+    this._ghost = 1;
+    this.immuneT = 0; // seconds of obstacle immunity after a stumble
+    this._tilt = new THREE.Quaternion(); // the root's tilt onto the snow
+    this._yawQ = new THREE.Quaternion();
+    this._n = new THREE.Vector3();
 
     this.isSled = gear.type === 'sled';
     this.isBoard = gear.type === 'board';
@@ -121,6 +137,7 @@ export class Player {
 
     const stumbling = this.stumbleT > 0 || this.knockT > 0;
     if (this.stumbleT > 0) this.stumbleT -= dt;
+    if (this.immuneT > 0) this.immuneT -= dt;
     if (this._boostT > 0) this._boostT -= dt;
     const prevS = this.progress;
     // the landing brace runs its course from touchdown: sink, push, settle
@@ -556,7 +573,7 @@ export class Player {
         nx = tb.x + tb.ax * stopA + tb.az * latN;
         nz = -(tb.s0 - tb.az * stopA + tb.ax * latN);
         this.speed *= 0.25;
-        if (!this.airborne && this.stumbleT <= 0) this.stumble('slammed a log');
+        if (!this.airborne && this.stumbleT <= 0 && this.immuneT <= 0) this.stumble('slammed a log');
         continue;
       }
       // resolve to whichever face is shallower: a line narrowing into the
@@ -586,7 +603,9 @@ export class Player {
   }
 
   _collide() {
-    if (this.stumbleT > 0) return;
+    // just been down: a short grace so a rider dropped into a thicket rides
+    // out of it instead of bouncing tree to tree
+    if (this.stumbleT > 0 || this.immuneT > 0) return;
     const s = this.progress;
     for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
       const dx = this.pos.x - o.x;
@@ -620,6 +639,7 @@ export class Player {
 
   stumble(reason) {
     this.stumbleT = 1.3;
+    this.immuneT = 2.5;
     this.speed *= 0.35;
     if (this.hud) this.hud.stumbleFlash(reason);
     if (this.fx) {
@@ -634,17 +654,35 @@ export class Player {
     // ride ON the rendered surface: the mesh interpolates above the analytic
     // height between samples, so lift slightly to keep gear visible
     if (!this.airborne) this.obj.position.y += 0.09;
-    this.obj.rotation.y = -this.yaw;
 
-    // align to slope when grounded, trick rotations when flying
+    // the whole rider stands on the local snow: the root is tilted onto
+    // the full ground normal (fore-aft AND side-to-side), then yawed, so
+    // the gear lies flush whichever way it points — a board checked
+    // sideways across a cross-slope no longer buries its nose. Airborne
+    // the tilt eases back upright while the rig carries the tricks.
+    const k = clamp(dt * 8, 0, 1);
     if (!this.airborne) {
-      const n = t.groundNormalAt(this.pos.x, this.pos.z);
-      const pitch = Math.atan2(-n.z, n.y) * 0.85;
-      this.rider.rig.rotation.x = lerp(this.rider.rig.rotation.x % (Math.PI * 2), -pitch, clamp(dt * 8, 0, 1));
+      const n = t.groundNormalAt(this.pos.x, this.pos.z, this._n);
+      this._tilt.slerp(new THREE.Quaternion().setFromUnitVectors(UP, n), k);
+      this.rider.rig.rotation.x = lerp(this.rider.rig.rotation.x % (Math.PI * 2), 0, k);
       this.rider.rig.rotation.y = 0;
     } else {
+      this._tilt.slerp(IDENTITY_Q, clamp(dt * 2, 0, 1));
       this.rider.rig.rotation.y = this.spinDone;
       this.rider.rig.rotation.x = this.flipDone;
+    }
+    this._yawQ.setFromAxisAngle(UP, -this.yaw);
+    this.obj.quaternion.copy(this._tilt).multiply(this._yawQ);
+
+    // ghosted while immune after a stumble: a soft flicker, like a respawn
+    const ghost = this.immuneT > 0 ? 0.45 + 0.2 * Math.sin(this.t * 22) : 1;
+    if (ghost !== this._ghost) {
+      this._ghost = ghost;
+      for (const m of this._mats) {
+        m.transparent = ghost < 1;
+        m.opacity = ghost;
+        m.depthWrite = ghost >= 1;
+      }
     }
 
     // blob shadow hugs the snow

@@ -101,9 +101,9 @@ function buildGear(gear) {
     stripe.scale.set(1, 1, 0.12);
     stripe.position.y = 0.048;
     g.add(base, deck, stripe);
-    // bindings sit where the pose actually plants the boots (measured), with
-    // the same duck angles the ankle comp applies: front open, back near flat
-    for (const [z, rot] of [[-0.35, 0.28], [0.35, -0.08]]) {
+    // bindings sit where the pose plants the boots, across the deck at the
+    // same duck angles the feet take (see footAnchors)
+    for (const [z, rot] of [[-0.35, -Math.PI / 2 + 0.32], [0.35, -Math.PI / 2 - 0.12]]) {
       const b = mesh(cached('bbind', () => new THREE.BoxGeometry(0.17, 0.05, 0.33)), darkMat);
       b.position.set(0, 0.065, z);
       b.rotation.y = rot;
@@ -324,8 +324,11 @@ export function createRider(gear, helmetColor, outfit = null) {
     ? null
     : isBoard
       ? {
-          [-1]: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: 0.28 }, // front foot, ducked open
-          1: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -0.08 }, // back foot, near flat
+          // boots sit ACROSS the board like real bindings, facing the way
+          // the hips face (+x), each ducked a little: the front toward the
+          // nose, the back toward the tail
+          [-1]: { pos: new THREE.Vector3(0, 0.175, -0.35), yaw: -Math.PI / 2 + 0.32 }, // front foot
+          1: { pos: new THREE.Vector3(0, 0.175, 0.35), yaw: -Math.PI / 2 - 0.12 }, // back foot
         }
       : {
           1: { pos: new THREE.Vector3(0.175, 0.2, 0.03), yaw: 0 },

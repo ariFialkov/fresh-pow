@@ -112,7 +112,16 @@ export class MenuScene {
     const outfit = outfitById(state.outfitId);
     this.playerRider = createRider(gear, 0xfbbf24, outfit);
     this.playerRider.root.position.copy(this.hero);
+    this._standOnSnow(this.playerRider);
     this.scene.add(this.playerRider.root);
+  }
+
+  /** Stand a rider on the local slope — gear flush with the snow, not planted upright through it. */
+  _standOnSnow(rider) {
+    const p = rider.root.position;
+    const n = this.terrain.groundNormalAt(p.x, p.z);
+    rider.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    p.y += 0.09; // ride on the rendered surface (see Player._sync)
   }
 
   _start() {
@@ -140,6 +149,7 @@ export class MenuScene {
         const rider = createRider(j.gear, j.identity.color);
         const lane = this.terrain.gateLanes[j.lane];
         rider.root.position.set(lane.x, this.terrain.groundAt(lane.x, lane.z), lane.z);
+        this._standOnSnow(rider);
         this.scene.add(rider.root);
         this.botRiders.push(rider);
         this.hud.addRider({ name: j.identity.name, color: j.identity.color, gearName: j.gear.name });

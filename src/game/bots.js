@@ -19,6 +19,10 @@ import { noise1, clamp, lerp, smoothstep } from './rng.js';
 
 const CRUISE = 27;
 const VMAX = 46;
+const UP = new THREE.Vector3(0, 1, 0);
+const IDENTITY_Q = new THREE.Quaternion();
+const _n = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 const M_PER_S_GAP = 22; // a metre of finishing gap is about this many seconds at pace
 const PLAN_MIN_SURPLUS = 2.6; // seconds early before a rider plans a fall
 const PLAN_LOOK = [55, 175]; // how far ahead an obstacle is picked, metres
@@ -38,6 +42,7 @@ export class Bot {
     Object.assign(this, opts);
     this.rider = createRider(this.gear, this.identity.color);
     this.obj = this.rider.root;
+    this._tilt = new THREE.Quaternion(); // the root's tilt onto the snow
 
     this.d = 4; // distance down the hill
     this.speed = 0;
@@ -384,16 +389,21 @@ export class Bot {
     // the tip leads: heading looks further down the line than the travel
     // direction, so the board visibly initiates each carve
     const visYaw = Math.atan2(this.pathAt(this.d + 7) - this.pathAt(this.d), 7);
-    this.obj.rotation.y = -visYaw;
     this.visYaw = visYaw;
     // body lean from the actual curvature of the line (centripetal force)
     const curv = (this.pathAt(this.d + 5) - 2 * this.pathAt(this.d) + this.pathAt(this.d - 5)) / 25;
     const lean = clamp(this.speed * this.speed * curv * 0.09, -1, 1);
 
+    // the rider stands on the local snow: root tilted onto the full ground
+    // normal, then yawed, so the gear lies flush whichever way it points
     if (!airborne) {
-      const n = this.terrain.groundNormalAt(x, z);
-      this.rider.rig.rotation.x = Math.atan2(-n.z, n.y) * -0.85;
+      const n = this.terrain.groundNormalAt(x, z, _n);
+      this._tilt.slerp(_q.setFromUnitVectors(UP, n), clamp(dt * 8, 0, 1));
+    } else {
+      this._tilt.slerp(IDENTITY_Q, clamp(dt * 2, 0, 1));
     }
+    this.obj.quaternion.copy(this._tilt).multiply(_q.setFromAxisAngle(UP, -visYaw));
+    this.rider.rig.rotation.x = 0;
 
     if (this.finished) {
       // brake out after the line, then stand in the corral
