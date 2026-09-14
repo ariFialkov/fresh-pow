@@ -112,8 +112,18 @@ export class Input {
     const sdy = e.clientY - t.sy;
     const now = performance.now();
     if (now - t.st < 260 && Math.hypot(sdx, sdy) > SWIPE_DIST) {
-      const dir = Math.abs(sdx) > Math.abs(sdy) ? (sdx > 0 ? 'right' : 'left') : (sdy > 0 ? 'down' : 'up');
-      if (this.onSwipe) this.onSwipe(dir);
+      const h = sdx > 0 ? 'right' : 'left';
+      const v = sdy > 0 ? 'down' : 'up';
+      if (this.onSwipe) {
+        // a diagonal flick is both directions at once — the special tricks
+        // (the player reads two swipes landing together as one)
+        if (Math.min(Math.abs(sdx), Math.abs(sdy)) > 0.55 * Math.max(Math.abs(sdx), Math.abs(sdy))) {
+          this.onSwipe(h);
+          this.onSwipe(v);
+        } else {
+          this.onSwipe(Math.abs(sdx) > Math.abs(sdy) ? h : v);
+        }
+      }
       t.sx = e.clientX;
       t.sy = e.clientY;
       t.st = now;

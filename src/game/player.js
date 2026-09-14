@@ -16,8 +16,26 @@ const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
 const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
+const HALF_NAMES = { left: 'Backside 180', right: 'Frontside 180' };
+// specials: two directions thrown together (a diagonal flick, two keys at
+// once) instead of one after the other — off-axis rotations with their own
+// body shapes, worth more than a stacked pair
+const SPECIALS = {
+  'left+up': { name: 'Backside Rodeo', spin: -1, flip: -1, roll: 0.6, pose: 'grab' },
+  'right+up': { name: 'Misty Flip', spin: 1, flip: -1, roll: -0.6, pose: 'grab' },
+  'left+down': { name: 'Backside Jackknife', spin: -1, flip: 0, roll: 0.45, pose: 'jackknife' },
+  'right+down': { name: 'Frontside Superman', spin: 1, flip: 0, roll: -0.45, pose: 'superman' },
+};
+const SPECIAL_PTS = 250;
+const SPECIAL_WINDOW = 120; // ms: two directions inside this count as one special
+const KNUCKLE_PTS = 150; // per trick while drifting a lip (vs 100)
+const SWITCH_PTS = 150; // landing backwards, clean
+const SWITCH_WINDOW = (15 * Math.PI) / 180; // how far off dead-backwards still lands switch
 const UP = new THREE.Vector3(0, 1, 0);
+const FWD = new THREE.Vector3(0, 0, -1);
 const IDENTITY_Q = new THREE.Quaternion();
+const TAU = Math.PI * 2;
+const isVert = (dir) => dir === 'up' || dir === 'down';
 
 export class Player {
   constructor(terrain, gear, input, hud, outfit = null) {
@@ -75,6 +93,13 @@ export class Player {
     this.pending = 0; // this jump's tricks — paid on a stomped landing, lost on a crash
     this._pipeReturn = 0; // after a pipe pop: which way is back into the pipe
     this._boostT = 0; // seconds of slipstream left after threading a boost gate
+    this._pendDir = null; // a direction waiting to see if a second joins it (specials)
+    this._special = null; // the special in flight: { kind, roll, t }
+    this._roll = new THREE.Quaternion(); // off-axis roll of a special, on the root
+    this._knuckle = false; // drifting a lip: low, long, floaty flight
+    this.switchRide = false; // riding backwards after a switch landing
+    this._halfDone = false; // the half-spin back to forward has been thrown this flight
+    this._lookSide = 1; // which shoulder a switch rider looks over
 
     // keep a handle on our swipe hook: the input is shared across scenes and
     // a dying race must only unhook itself, never the race replacing it
@@ -91,16 +116,69 @@ export class Player {
     return -this.pos.z;
   }
 
+  /**
+   * A direction thrown in the air. It waits a beat for a partner: a second
+   * direction on the other axis inside the window makes a special; on its
+   * own (or after the window) it is the ordinary trick it always was.
+   */
   _trick(dir) {
     if (!this.airborne || this.finished) return;
-    if (dir === 'left') this.trickSpin -= Math.PI * 2;
-    else if (dir === 'right') this.trickSpin += Math.PI * 2;
-    else if (dir === 'up') this.trickFlip -= Math.PI * 2;
-    else this.trickFlip += Math.PI * 2;
-    this.combo.push(TRICK_NAMES[dir]);
+    const now = performance.now();
+    const p = this._pendDir;
+    if (p && now - p.at < SPECIAL_WINDOW && isVert(dir) !== isVert(p.dir)) {
+      this._pendDir = null;
+      this._specialTrick(p.dir, dir);
+      return;
+    }
+    if (p) {
+      this._pendDir = null;
+      this._basicTrick(p.dir);
+    }
+    this._pendDir = { dir, at: now };
+  }
+
+  /** Commit a waiting direction once its window has passed (or at touchdown). */
+  _flushTrick(force = false) {
+    const p = this._pendDir;
+    if (!p) return;
+    if (force || performance.now() - p.at >= SPECIAL_WINDOW) {
+      this._pendDir = null;
+      if (this.airborne && !this.finished) this._basicTrick(p.dir);
+    }
+  }
+
+  _basicTrick(dir) {
+    let name = TRICK_NAMES[dir];
+    if (dir === 'left' || dir === 'right') {
+      // riding switch, the first spin is only the half turn back to forward
+      const half = this.switchRide && !this._halfDone;
+      const turn = half ? Math.PI : TAU;
+      this.trickSpin += dir === 'left' ? -turn : turn;
+      if (half) {
+        this._halfDone = true;
+        name = HALF_NAMES[dir];
+      }
+    } else if (dir === 'up') this.trickFlip -= TAU;
+    else this.trickFlip += TAU;
+    this._score(name, this._knuckle ? KNUCKLE_PTS : 100);
+  }
+
+  _specialTrick(a, b) {
+    const key = isVert(a) ? `${b}+${a}` : `${a}+${b}`;
+    const sp = SPECIALS[key];
+    if (!sp) return;
+    if (sp.spin) this.trickSpin += sp.spin * (this.switchRide && !this._halfDone ? Math.PI : TAU);
+    if (this.switchRide && !this._halfDone && sp.spin) this._halfDone = true;
+    if (sp.flip) this.trickFlip += sp.flip * TAU;
+    this._special = { kind: sp.pose, roll: sp.roll, t: 0 };
+    this._score(sp.name, this._knuckle ? SPECIAL_PTS * 1.5 : SPECIAL_PTS);
+  }
+
+  _score(name, base) {
+    this.combo.push(name);
     // combos build multipliers — but nothing counts until the landing sticks
-    this.pending += 100 * this.combo.length;
-    if (this.hud) this.hud.trickToast(this.combo.join(' + '), `${this.pending} riding on the landing`);
+    this.pending += Math.round(base * this.combo.length);
+    if (this.hud) this.hud.trickToast(this.combo.join(' + '), `${this.pending} riding on the landing${this._knuckle ? ' · knuckle' : ''}`);
   }
 
   update(dt) {
@@ -338,8 +416,16 @@ export class Player {
         // ground fell away — takeoff
         this.airborne = true;
         this.vy = clamp(climbVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
-        // pop: released tuck right at the lip
-        if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
+        if (braking && this.speed > 8) {
+          // the knuckle tuck: drifting the lip sideways kills the kick the
+          // ramp would have given, but the run carries — a low, long,
+          // floating flight (the tricks in it pay more)
+          this._knuckle = true;
+          this.vy = Math.max(0.8, this.vy * 0.35);
+          this.speed *= 1.12;
+          if (this.hud) this.hud.trickToast('KNUCKLE TUCK', 'drifted the lip');
+        } else if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
+          // pop: released tuck right at the lip
           this.vy += 4.2;
           if (this.hud) this.hud.trickToast('POP!', 'perfect release');
         }
@@ -365,8 +451,11 @@ export class Player {
     } else {
       // ---- air ----
       this._prevPipeQ = null; // re-arm the lip launch only from riding, not landing
-      this.vy -= AIR_G * dt;
-      this.speed = Math.max(0, this.speed - DRAG_K * 0.4 * this.speed * this.speed * dt);
+      this._flushTrick();
+      // a knuckle flight hangs: the drift reads as floating out over the knuckle
+      this.vy -= AIR_G * (this._knuckle ? 0.55 : 1) * dt;
+      this.speed = Math.max(0, this.speed - DRAG_K * (this._knuckle ? 0.2 : 0.4) * this.speed * this.speed * dt);
+      if (this._special) this._special.t += dt;
       let nx = this.pos.x + dir.x * this.speed * dt;
       let nz = this.pos.z + dir.z * this.speed * dt;
       // even airborne, a hollow trunk's walls stay solid — launching off the
@@ -399,11 +488,17 @@ export class Player {
 
       if (ny <= ground) {
         // ---- landing ----
+        this._flushTrick(true);
         this.pos.set(nx, ground, nz);
         this.airborne = false;
         const spinLeft = Math.abs(this.trickSpin - this.spinDone);
         const flipLeft = Math.abs(this.trickFlip - this.flipDone);
-        const sloppy = spinLeft > 0.9 || flipLeft > 0.9;
+        // the switch window: upright (every flip finished) and half a turn
+        // from where the spin was going — that lands too, backwards
+        const facing = this.switchRide ? Math.PI : 0;
+        const landedAt = ((facing + this.spinDone) % TAU + TAU) % TAU;
+        const switchLanding = flipLeft <= 0.9 && spinLeft > 0.9 && Math.abs(landedAt - Math.PI) <= SWITCH_WINDOW;
+        const sloppy = !switchLanding && (spinLeft > 0.9 || flipLeft > 0.9);
         const impact = Math.min(1, -this.vy / 14);
         this._landT = 0;
         this._landAmp = 0.45 + impact * 0.55;
@@ -423,6 +518,24 @@ export class Player {
           this.pending = 0;
         } else if (this.combo.length) {
           this.speed += 1.5; // clean landing keeps momentum
+          const wasSwitch = this.switchRide;
+          if (switchLanding) {
+            // the spin only got halfway: it was a 180 all along
+            const last = this.combo.length - 1;
+            this.combo[last] = this.combo[last].replace('360', '180');
+            this.switchRide = !wasSwitch;
+            this._lookSide = this.spinDone < 0 ? -1 : 1;
+          } else {
+            // a completed spin lands where it was headed: forward unless a
+            // full turn was thrown from switch (which brings it back around)
+            this.switchRide = Math.abs(((facing + this.trickSpin) % TAU + TAU) % TAU - Math.PI) < 0.01;
+          }
+          // landing backwards from forward is the trick that pays; turning
+          // back is the easy way round
+          if (this.switchRide && !wasSwitch) {
+            this.pending += SWITCH_PTS;
+            this.combo.push('Switch landing');
+          }
           this.style += this.pending;
           if (this.hud) this.hud.trickToast(`STOMPED IT  +${this.pending}`, this.combo.join(' + '));
           this.pending = 0;
@@ -431,6 +544,9 @@ export class Player {
         this.trickSpin = this.spinDone = 0;
         this.trickFlip = this.flipDone = 0;
         this.combo = [];
+        this._special = null;
+        this._knuckle = false;
+        this._halfDone = false;
         this.vy = 0;
         // off a pipe wall: land turned square across the pipe, facing the
         // middle, so the run carries back through the transition
@@ -507,11 +623,18 @@ export class Player {
     this._prevSpeed = this.speed;
     this.longA = lerp(this.longA ?? 0, clamp(rawLongA, -18, 12), clamp(dt * 7, 0, 1));
 
+    // a special's off-axis roll swells and dies over the flight
+    const spAmt = this._special ? Math.sin(Math.PI * clamp(this._special.t / 0.9, 0, 1)) : 0;
     setPose(this.rider, {
       tuck: inp.tuck && !stumbling ? 1 : 0,
       brake: inp.brake && !stumbling ? 1 : 0,
-      // lean comes from the actual centripetal force of the carve
-      steer: clamp(this.latA / 11, -1, 1),
+      // lean comes from the actual centripetal force of the carve — felt
+      // the other way round by a body riding backwards
+      steer: clamp(this.latA / 11, -1, 1) * (this.switchRide ? -1 : 1),
+      switchRide: this.switchRide,
+      lookSide: this._lookSide,
+      special: this._special ? { kind: this._special.kind, amt: spAmt } : null,
+      drift: this._knuckle && this.airborne ? 1 : 0,
       // weight shifts back over the tails as the edge drifts, forward in a tuck
       shift: clamp((inp.tuck ? 0.45 : 0) - Math.abs(this.slip) * 1.3 - (inp.brake ? 0.5 : 0), -1, 0.5),
       stumble: this.stumbleT > 0 ? 1 : 0,
@@ -595,6 +718,7 @@ export class Player {
     if (this.knockT > 0) return;
     this.knockT = 1.7;
     this.speed *= 0.25;
+    this.switchRide = false;
     if (this.hud) this.hud.stumbleFlash(`taken out by ${byName}!`);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -641,6 +765,7 @@ export class Player {
     this.stumbleT = 1.3;
     this.immuneT = 2.5;
     this.speed *= 0.35;
+    this.switchRide = false; // back up facing the way you came in
     if (this.hud) this.hud.stumbleFlash(reason);
     if (this.fx) {
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -661,18 +786,25 @@ export class Player {
     // sideways across a cross-slope no longer buries its nose. Airborne
     // the tilt eases back upright while the rig carries the tricks.
     const k = clamp(dt * 8, 0, 1);
+    // riding switch the whole rider (gear included) is turned half round on
+    // the rig; spins in the air run on from wherever the body faces
+    const facing = this.switchRide ? Math.PI : 0;
     if (!this.airborne) {
       const n = t.groundNormalAt(this.pos.x, this.pos.z, this._n);
       this._tilt.slerp(new THREE.Quaternion().setFromUnitVectors(UP, n), k);
       this.rider.rig.rotation.x = lerp(this.rider.rig.rotation.x % (Math.PI * 2), 0, k);
-      this.rider.rig.rotation.y = 0;
+      this.rider.rig.rotation.y = facing;
+      this._roll.slerp(IDENTITY_Q, k);
     } else {
       this._tilt.slerp(IDENTITY_Q, clamp(dt * 2, 0, 1));
-      this.rider.rig.rotation.y = this.spinDone;
+      this.rider.rig.rotation.y = facing + this.spinDone;
       this.rider.rig.rotation.x = this.flipDone;
+      // a special corks off-axis: a roll on the root that swells mid-flight
+      const roll = this._special ? this._special.roll * Math.sin(Math.PI * clamp(this._special.t / 0.9, 0, 1)) : 0;
+      this._roll.setFromAxisAngle(FWD, roll);
     }
     this._yawQ.setFromAxisAngle(UP, -this.yaw);
-    this.obj.quaternion.copy(this._tilt).multiply(this._yawQ);
+    this.obj.quaternion.copy(this._tilt).multiply(this._yawQ).multiply(this._roll);
 
     // ghosted while immune after a stumble: a soft flicker, like a respawn
     const ghost = this.immuneT > 0 ? 0.45 + 0.2 * Math.sin(this.t * 22) : 1;

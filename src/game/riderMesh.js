@@ -349,7 +349,7 @@ export function createRider(gear, helmetColor, outfit = null) {
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
-    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0, twist: 0, curl: 0 },
+    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0, twist: 0, curl: 0, sp: 0, drift: 0 },
   };
   setPose(rider, { idle: true, t: 0, dt: 1 }); // dt=1 converges the damping instantly
   return rider;
@@ -578,6 +578,9 @@ export function setPose(rider, p = {}) {
   S.shift = ease(S.shift, p.shift ?? 0, 4.5); // fore/aft weight over the deck
   S.twist = ease(S.twist, p.twist ?? 0, 8); // spin rate while tricking
   S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
+  S.sp = ease(S.sp, p.special ? p.special.amt : 0, 12); // a special's body shape, in and out
+  S.drift = ease(S.drift, p.drift ?? 0, 6); // the knuckle-tuck float
+  if (p.special) rider._spKind = p.special.kind;
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
   const twist = S.twist;
@@ -586,6 +589,18 @@ export function setPose(rider, p = {}) {
   const airborne = !!p.airborne;
   const idle = !!p.idle;
   const speed = p.speedNorm ?? 0;
+  // riding switch: the whole rider is turned half round (the rig is
+  // rotated by the player), so the pose only adds what a backwards rider
+  // does differently — skiers and sledders look back over a shoulder at
+  // the hill coming at them; a boarder is still sideways and simply opens
+  // toward the downhill, which is now the other way round the body
+  const sw = !!p.switchRide;
+  const look = p.lookSide ?? 1;
+  const swLook = sw && !isBoard ? 1 : 0;
+  const open = isBoard && sw ? -1 : 1;
+  const sp = S.sp;
+  const spK = rider._spKind;
+  const drift = S.drift;
 
   // ---- output springs: joints carry inertia. Loose parts (arms, head,
   // poles) lag and overshoot like flesh reacting to forces; legs stay
@@ -749,7 +764,7 @@ export function setPose(rider, p = {}) {
   // deep frontside carve: the whole body sinks and the trailing mitt reaches
   // down to brush the snow (race scene reads mittDrag + mittWorld for spray)
   // (regular stance: toeside is a RIGHT turn, steer > 0)
-  const fsDrag = isBoard && !idle
+  const fsDrag = isBoard && !idle && !sw
     ? Math.max(0, (steer - 0.45) / 0.55) * (1 - air) * (1 - tuck) * (1 - knocked)
     : 0;
   rider.mittDrag = fsDrag;
@@ -760,7 +775,9 @@ export function setPose(rider, p = {}) {
   const kneeGround = idle
     ? (isBoard ? 0.2 : 0.14) + breathe * 0.03
     : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.42 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
-  const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25) * air;
+  // specials fold or stretch the legs; a knuckle float rides low and loose
+  const spKnee = sp * (spK === 'jackknife' ? 0.9 : spK === 'grab' ? 0.45 : spK === 'superman' ? -0.5 : 0);
+  const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25 + spKnee + drift * 0.35) * air;
 
   // the legs are IK-solved to the binding anchors (applySkeleton); the pose
   // only decides how LOW the pelvis rides, which is what sets the knee bend
@@ -809,7 +826,8 @@ export function setPose(rider, p = {}) {
     // boarder carries no local tuck pitch at all)
     : (isBoard ? 0.14 : 0.06) + tuck * (isBoard ? -0.14 : 0.1) - brake * 0.22 + knocked * 0.5 + shift * 0.22
       + (isBoard ? Math.min(0, steer) * 0.25 * (1 - tuck) : 0); // heelside (left turn): lean back casual
-  const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6) * air;
+  const spSpine = sp * (spK === 'jackknife' ? 1.0 : spK === 'grab' ? 0.3 : spK === 'superman' ? -0.4 : 0);
+  const spineBase = spineGround * (1 - air) + (-0.08 + tuck * 0.2 + curl * 0.6 + spSpine + drift * 0.3) * air;
   // the fold spreads over two spine joints for a rounded back; the torso
   // counter-rotates against the hips through carves for that wound-up look
   // acceleration G presses the body upright/back — but a tucked rider is
@@ -821,15 +839,16 @@ export function setPose(rider, p = {}) {
   RZ(parts.spine, steer * (isBoard ? -0.12 : 0.08) + wobS * 0.3 + swayA * 0.6, 9, 0.65);
   // boarders keep their shoulders with the board (only the head opens
   // downhill); skiers square the torso back toward the fall line
-  RY(parts.spine, -pelvisYaw * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air, 9, 0.65);
+  RY(parts.spine, -pelvisYaw * open * (isBoard ? 0.08 : 0.25) + steer * (isBoard ? 0.26 : 0.18) + twist * 0.35 * air + swLook * look * 0.2, 9, 0.65);
   RX(parts.chest, spineBase * 0.55 + tuck * (isBoard ? 0 : 0.35) + brace * 0.12 + wobS * 0.5 + longG * -0.22 * gBrace, 8.5, 0.6);
   RZ(parts.chest, steer * (isBoard ? -0.12 : 0.04) + swayA * 0.5, 8.5, 0.6);
   // a tucked boarder's shoulders open down the line with the head
-  RY(parts.chest, -pelvisYaw * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + (isBoard ? tuck * 0.35 : 0) + twist * 0.5 * air, 8.5, 0.6);
+  RY(parts.chest, -pelvisYaw * open * (isBoard ? 0.14 : 0.3) + steer * (isBoard ? 0.22 : 0.14) + (isBoard ? tuck * 0.35 * open : 0) + twist * 0.5 * air + swLook * look * 0.4, 8.5, 0.6);
   // the head is the loosest mass: it counter-balances late and wobbles
   RX(parts.neck, -(spineBase + tuck * 0.35) * 0.75 - brace * 0.22 + longG * 0.3, 6.5, 0.48);
   RZ(parts.neck, steer * 0.38 + swayA * 0.9, 6.5, 0.48);
-  RY(parts.neck, -pelvisYaw * (isBoard ? 0.72 : 0.45) - steer * 0.2 + twist * 0.7 * air, 6.5, 0.48);
+  // (a switch skier's or sledder's head is round on a shoulder, checking the hill behind)
+  RY(parts.neck, -pelvisYaw * open * (isBoard ? 0.72 : 0.45) - steer * 0.2 + twist * 0.7 * air + swLook * look * 1.2 * (1 - air), 6.5, 0.48);
 
   // (legs: applySkeleton IK-solves them down to the binding anchors from
   // the pelvis the springs above just placed; skiers additionally drive
@@ -926,9 +945,26 @@ export function setPose(rider, p = {}) {
       const spread = 1.15 - Math.abs(twist) * 0.85 + stumble * 0.4;
       const grab = arm.side < 0 ? curl * 0.9 : curl * 0.25;
       const throwZ = twist * 0.55; // both arms swing toward the rotation
-      sx = sx * (1 - air) + (-0.5 + wobA + grab + Math.abs(twist) * 0.3 + twist * arm.side * 0.4) * air;
-      sz = sz * (1 - air) + (arm.side * spread + throwZ) * air;
-      ex = ex * (1 - air) + (0.55 + grab * 0.5 + Math.abs(twist) * 0.5) * air;
+      let ax = -0.5 + wobA + grab + Math.abs(twist) * 0.3 + twist * arm.side * 0.4;
+      let az = arm.side * spread + throwZ;
+      let aex = 0.55 + grab * 0.5 + Math.abs(twist) * 0.5;
+      // the specials' shapes: a jackknife reaches both hands to the feet, a
+      // grab drops the trailing hand to the deck and flings the other out,
+      // a superman lays both arms straight out ahead
+      if (sp > 0.01) {
+        if (spK === 'jackknife') { ax = mix(ax, 1.35, sp); az = mix(az, arm.side * 0.35, sp); aex = mix(aex, 0.15, sp); }
+        else if (spK === 'grab') {
+          if (arm.side < 0) { ax = mix(ax, 1.0, sp); az = mix(az, -0.55, sp); aex = mix(aex, 0.1, sp); }
+          else az = mix(az, 1.35, sp);
+        } else if (spK === 'superman') { ax = mix(ax, 2.3, sp); az = mix(az, arm.side * 0.2, sp); aex = mix(aex, 0.05, sp); }
+      }
+      // the knuckle float: arms swept back, low and steady
+      ax = mix(ax, -1.0, drift * 0.8);
+      az = mix(az, arm.side * 0.3, drift * 0.8);
+      aex = mix(aex, 0.1, drift * 0.8);
+      sx = sx * (1 - air) + ax * air;
+      sz = sz * (1 - air) + az * air;
+      ex = ex * (1 - air) + aex * air;
       wx = wx * (1 - air) + -0.2 * air;
     }
     // arms are loose masses: they trail the body and swing through stops

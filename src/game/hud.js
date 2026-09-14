@@ -356,8 +356,8 @@ export class RaceHud {
 
     const touch = matchMedia('(pointer: coarse)').matches;
     el.querySelector('#controls-hint').textContent = touch
-      ? 'pull ⬅➡ carve · pull ⬆ + hold tuck · pull ⬇ + hold brake · swipe in air for tricks'
-      : 'A/D carve · hold W tuck · hold S brake · tap WASD in air for tricks';
+      ? 'pull ⬅➡ carve · pull ⬆ + hold tuck · pull ⬇ + hold brake · swipe in air for tricks · diagonal swipe for specials · brake into a lip to knuckle'
+      : 'A/D carve · hold W tuck · hold S brake · tap WASD in air for tricks · two keys together for specials · brake into a lip to knuckle';
     setTimeout(() => {
       const h = el.querySelector('#controls-hint');
       if (h) h.style.opacity = '0';
