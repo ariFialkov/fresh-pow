@@ -85,7 +85,7 @@ res = await page.evaluate(async () => {
 });
 check(res.combo.length === 2 && res.combo[0] === 'Backside 360' && res.combo[1] === 'Front Flip', `apart = two tricks: ${JSON.stringify(res.combo)} ${res.pend} pts, landed style ${res.land.style} stumble ${res.land.stumble}`);
 
-// 2. knuckle tuck
+// 2. knuckle huck
 res = await page.evaluate(() => {
   const plain = { launch: window.__launch(false) };
   plain.fly = window.__fly();

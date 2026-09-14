@@ -417,13 +417,13 @@ export class Player {
         this.airborne = true;
         this.vy = clamp(climbVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
         if (braking && this.speed > 8) {
-          // the knuckle tuck: drifting the lip sideways kills the kick the
+          // the knuckle huck: drifting the lip sideways kills the kick the
           // ramp would have given, but the run carries — a low, long,
           // floating flight (the tricks in it pay more)
           this._knuckle = true;
           this.vy = Math.max(0.8, this.vy * 0.35);
           this.speed *= 1.12;
-          if (this.hud) this.hud.trickToast('KNUCKLE TUCK', 'drifted the lip');
+          if (this.hud) this.hud.trickToast('KNUCKLE HUCK', 'drifted the lip');
         } else if (performance.now() - inp.lastTuckRelease < POP_WINDOW) {
           // pop: released tuck right at the lip
           this.vy += 4.2;

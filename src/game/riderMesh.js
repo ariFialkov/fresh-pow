@@ -579,7 +579,7 @@ export function setPose(rider, p = {}) {
   S.twist = ease(S.twist, p.twist ?? 0, 8); // spin rate while tricking
   S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
   S.sp = ease(S.sp, p.special ? p.special.amt : 0, 12); // a special's body shape, in and out
-  S.drift = ease(S.drift, p.drift ?? 0, 6); // the knuckle-tuck float
+  S.drift = ease(S.drift, p.drift ?? 0, 6); // the knuckle-huck float
   if (p.special) rider._spKind = p.special.kind;
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
