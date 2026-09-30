@@ -31,6 +31,7 @@ await page.evaluate(() => {
     const t = r.terrain, P = r.player, j = t.jumps[0];
     P.pos.set(j.x, t.groundAt(j.x, -(j.s - 60)), -(j.s - 60));
     P.speed = 24; P.airborne = false; P.yaw = P.travelYaw = 0; P.stumbleT = 0; P.immuneT = 0; P.switchRide = false;
+    P.finished = false;
     P.style = 0; P.pending = 0; P.combo = []; P.trickSpin = P.spinDone = P.trickFlip = P.flipDone = 0;
     r.input.brake = false; r.input.tuck = false; r.input.steer = 0;
     for (let i = 0; i < 600 && !P.airborne; i++) {

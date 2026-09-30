@@ -16,14 +16,17 @@ import * as THREE from 'three';
 import { createRider, setPose, landingBrace } from './riderMesh.js';
 import { COURSE } from './terrain.js';
 import { noise1, clamp, lerp, smoothstep } from './rng.js';
+import { SPEED_SCALE as S } from './tuning.js';
 
-const CRUISE = 27;
-const VMAX = 46;
+// paces, and the conversion from a gap in metres to one in seconds, all
+// ride the mountain's speed scale so the field keeps its shape
+const CRUISE = 27 * S;
+const VMAX = 46 * S;
 const UP = new THREE.Vector3(0, 1, 0);
 const IDENTITY_Q = new THREE.Quaternion();
 const _n = new THREE.Vector3();
 const _q = new THREE.Quaternion();
-const M_PER_S_GAP = 22; // a metre of finishing gap is about this many seconds at pace
+const M_PER_S_GAP = 22 * S; // a metre of finishing gap is about this many seconds at pace
 const PLAN_MIN_SURPLUS = 2.6; // seconds early before a rider plans a fall
 const PLAN_LOOK = [55, 175]; // how far ahead an obstacle is picked, metres
 const PLAN_MAX_DEV = 16; // metres of line change a plan may ask for
@@ -60,7 +63,7 @@ export class Bot {
     this.personality = noise1(this.seed * 0.13, 991) * 18;
     this.weavePhase = this.seed * 2.39;
     this.overall = opts.overall ?? opts.rank; // drawn result position (the sheet); rank is the crossing order
-    this.vNat = CRUISE + this.personality * 0.3; // this rider's own cruising pace
+    this.vNat = CRUISE + this.personality * 0.3 * S; // this rider's own cruising pace
     this.seedU = (noise1(this.seed * 0.71, 443) + 1) / 2; // 0..1, this rider's own dice
     // the race plan: where this rider means to be relative to the player
     // at a few points down the course — its own story of leads taken and
@@ -205,19 +208,19 @@ export class Bot {
     this._washCd -= dt;
     if (this.finished) {
       // hockey-stop into the corral
-      v = Math.max(0, this.speed - 13 * dt);
+      v = Math.max(0, this.speed - 13 * S * dt);
     } else if (this.autopilot || playerFinished || (!this.ahead && this.d > L - 45)) {
       // free running to the line. Ahead-bots stay on the pacing controller all
       // the way across so their drawn gaps (and order) hold to the line.
-      v = Math.min(this.speed + 6 * dt, this.vNat);
+      v = Math.min(this.speed + 6 * S * dt, this.vNat);
     } else {
       // ---- pacing on a time budget ----
       // when will the player reach the line? Their average pace so far,
       // leaning on the current speed — a normal pace assumed off the start,
       // before the average means anything
       const elapsed = Math.max(1, race.time - (race.goTime ?? race.time));
-      const avgP = clamp(playerD / elapsed, 4, 44);
-      let vP = clamp(0.55 * avgP + 0.45 * race.player.speed, 4, 44);
+      const avgP = clamp(playerD / elapsed, 4 * S, 44 * S);
+      let vP = clamp(0.55 * avgP + 0.45 * race.player.speed, 4 * S, 44 * S);
       if (playerD < 150) vP = Math.max(vP, CRUISE * 0.8);
       // the next waypoint of the plan: be off_w metres from the player when
       // the player reaches s_w; past the last one, the drawn gap at the line
@@ -243,10 +246,10 @@ export class Bot {
       const vNat = this.vNat * mul;
       // ahead-bots can always out-run the player when they must, so a
       // tucked sprint never beats a rider destined to finish in front
-      let vmax = this.ahead ? Math.max(VMAX, race.player.speed + 8) : VMAX;
+      let vmax = this.ahead ? Math.max(VMAX, race.player.speed + 8 * S) : VMAX;
       // no holeshot: off the start the pack winds up with the player
-      if (this.d < 220) vmax = Math.min(vmax, race.player.speed + 9);
-      if (vReq > vNat * 1.06) v = Math.min(vReq * 1.04 + 1.5, vmax); // running late: push
+      if (this.d < 220) vmax = Math.min(vmax, race.player.speed + 9 * S);
+      if (vReq > vNat * 1.06) v = Math.min(vReq * 1.04 + 1.5 * S, vmax); // running late: push
       else if (vReq < vNat * 0.94) v = Math.max(vReq * 0.97, vNat * 0.5); // running early: ease off
       else v = vNat;
 
@@ -261,12 +264,12 @@ export class Bot {
         const need = lerp(-70, 2.5 + (this.playerRank - this.rank - 1) * 3 + 6, ramp);
         const deficit = need - lead;
         if (ramp > 0 && deficit > 0) {
-          vmax = Math.max(vmax, race.player.speed + 16);
-          v = Math.max(v, race.player.speed + clamp(deficit * 0.8, 2, 16));
+          vmax = Math.max(vmax, race.player.speed + 16 * S);
+          v = Math.max(v, race.player.speed + clamp(deficit * 0.8, 2 * S, 16 * S));
         }
       } else {
         const room = playerD - this.finalGap + this.allowance(L, playerD) - this.d;
-        if (room < 12) v = Math.min(v, Math.max(0, race.player.speed + room * 1.2 - 3));
+        if (room < 12) v = Math.min(v, Math.max(0, race.player.speed + room * 1.2 - 3 * S));
       }
       v = Math.min(v, vmax);
 
@@ -316,11 +319,11 @@ export class Bot {
     }
 
     if (this.aggro > 0) this.aggro -= dt;
-    if (this.knockT > 0) v = Math.min(v, 3); // down riders slide, not race
+    if (this.knockT > 0) v = Math.min(v, 3 * S); // down riders slide, not race
 
     const prevSpeed = this.speed;
     this.speed = lerp(this.speed, v, clamp(dt * 2.5, 0, 1));
-    this._longA = lerp(this._longA ?? 0, dt > 0 ? clamp((this.speed - prevSpeed) / dt, -18, 12) : 0, clamp(dt * 7, 0, 1));
+    this._longA = lerp(this._longA ?? 0, dt > 0 ? clamp((this.speed - prevSpeed) / dt, -18 * S, 12 * S) : 0, clamp(dt * 7, 0, 1));
     this.d += this.speed * dt;
 
     // the planned fall: reaching the obstacle, go down on it
@@ -346,7 +349,7 @@ export class Bot {
       // standing there falling over every few seconds is worse than waiting)
       const pinned = before - this.d > 0.15 && this.d < L - 70;
       this._holdT = pinned ? this._holdT + dt : 0;
-      const patience = race.player.speed < 3 ? 1.2 : 3.5 + this.seedU * 3;
+      const patience = race.player.speed < 3 * S ? 1.2 : 3.5 + this.seedU * 3;
       if (this._holdT > patience && this._washCd <= 0 && this.stumbleT <= 0) {
         this._fall(race, false);
         this._washCd = 10 + this.seedU * 6;
@@ -412,7 +415,7 @@ export class Bot {
     this.visYaw = visYaw;
     // body lean from the actual curvature of the line (centripetal force)
     const curv = (this.pathAt(this.d + 5) - 2 * this.pathAt(this.d) + this.pathAt(this.d - 5)) / 25;
-    const lean = clamp(this.speed * this.speed * curv * 0.09, -1, 1);
+    const lean = clamp(this.speed * this.speed * curv * 0.09 / (S * S), -1, 1);
 
     // the rider stands on the local snow: root tilted onto the full ground
     // normal, then yawed, so the gear lies flush whichever way it points
@@ -428,30 +431,30 @@ export class Bot {
     if (this.finished) {
       // brake out after the line, then stand in the corral
       setPose(this.rider, {
-        brake: this.speed > 2 ? 1 : 0,
-        idle: this.speed <= 2,
+        brake: this.speed > 2 * S ? 1 : 0,
+        idle: this.speed <= 2 * S,
         t: this._t + this.weavePhase,
         dt,
       });
     } else {
       setPose(this.rider, {
         steer: lean,
-        tuck: this.speed > 21 && this.knockT <= 0 ? 1 : 0,
+        tuck: this.speed > 21 * S && this.knockT <= 0 ? 1 : 0,
         stumble: this.stumbleT > 0 ? 1 : 0,
         knocked,
         airborne,
         crouch,
-        speedNorm: clamp(this.speed / 26, 0, 1),
-        longG: clamp((this._longA ?? 0) / 11, -1, 1),
+        speedNorm: clamp(this.speed / (26 * S), 0, 1),
+        longG: clamp((this._longA ?? 0) / (11 * S), -1, 1),
         t: this._t + this.weavePhase,
         dt,
       });
     }
 
     // powder off the carves (cheaper budget than the player's spray)
-    if (race.fx && !airborne && this.speed > 10) {
+    if (race.fx && !airborne && this.speed > 10 * S) {
       const edge = Math.abs(lean);
-      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * 0.32 * dt * 60;
+      this._sprayAcc = (this._sprayAcc || 0) + (0.25 + edge * 1.1 + (this.stumbleT > 0 ? 2 : 0)) * this.speed * (0.32 / S) * dt * 60;
       const side = Math.sign(lean) || 1;
       while (this._sprayAcc >= 1) {
         this._sprayAcc -= 1;
@@ -467,8 +470,8 @@ export class Bot {
     }
     // boarder bots brushing a mitt through a deep frontside carve
     const mitt = this.rider.mittDrag ?? 0;
-    if (race.fx && !airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8) {
-      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.15 * dt * 60;
+    if (race.fx && !airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8 * S) {
+      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * (0.15 / S) * dt * 60;
       const mw = this.rider.mittWorld;
       while (this._mittAcc >= 1) {
         this._mittAcc -= 1;

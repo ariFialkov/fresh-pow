@@ -4,13 +4,14 @@
 import * as THREE from 'three';
 import { Terrain, rockPenetration } from './terrain.js';
 import { FORMATS, liveBotStyle, settleScores } from './formats.js';
-import { Player } from './player.js';
+import { Player, playerTopSpeed } from './player.js';
 import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
 import { SprayPool, GearTrails } from './snowfx.js';
 import { StartGate } from './startgate.js';
 import { mulberry32 } from './rng.js';
+import { SPEED_SCALE as S } from './tuning.js';
 import { drawOutcome, multiplierFor, EVENTS } from './rtp.js';
 import { THEMES } from './themes.js';
 import { Animals } from './animals.js';
@@ -162,7 +163,7 @@ export class RaceScene {
     this._updateCamera(1, true);
 
     // debug/test hook (also handy in devtools)
-    window.__fp = { race: this, rockPenetration };
+    window.__fp = { race: this, rockPenetration, SPEED_SCALE: S, playerTopSpeed };
   }
 
   onBotFinish(bot) {
@@ -199,7 +200,7 @@ export class RaceScene {
 
     if (racing) {
       // track stalls so ahead-bots can eventually ride out
-      if (this.player.speed < 2 && !this.player.finished) this.playerStallTime += dt;
+      if (this.player.speed < 2 * S && !this.player.finished) this.playerStallTime += dt;
       else this.playerStallTime = 0;
 
       this.player.update(dt);
@@ -329,11 +330,11 @@ export class RaceScene {
       const side = Math.sign(dx) || 1;
       b._pushX += side * 1.5;
 
-      if (b.speed > p.speed + 1.5) {
+      if (b.speed > p.speed + 1.5 * S) {
         // bot rolls through the player
         this.playerKnocks++;
         p.knockDown(b.identity.name);
-      } else if (p.speed > b.speed + 1.5) {
+      } else if (p.speed > b.speed + 1.5 * S) {
         b.knockDown();
         // a knockdown is worth style in the combined — banked on the spot,
         // nothing to land
@@ -376,12 +377,12 @@ export class RaceScene {
       if (gap < 8) {
         // closing on the rider drawn ahead: ease off, so the order sorts
         // itself out as a speed difference rather than a shove
-        worse.speed = Math.min(worse.speed, Math.max(0, better.speed - (gap < 2.2 ? 1.5 : 0.5)));
+        worse.speed = Math.min(worse.speed, Math.max(0, better.speed - (gap < 2.2 ? 1.5 : 0.5) * S));
       }
       const need = worse.d + 2.2 - better.d;
       if (need > 0) {
         // the better rider gains only what a real overtake could deliver
-        better.d += Math.min(need, 12 * dt);
+        better.d += Math.min(need, 12 * S * dt);
         // last resort right at the line: hold the worse one back
         if (worse.d > L - 20) worse.d = Math.min(worse.d, better.d - 2.2);
       }
@@ -457,7 +458,7 @@ export class RaceScene {
       playerPos,
       playerStyle: this.player.style,
       playerTime: this.playerClock ?? this.time - this.goTime,
-      bots: this.bots.map((b) => ({ rank: b.overall, time: this.solo ? null : (b.finishTime ?? this.time + (L - b.d) / Math.max(8, b.speed)) - this.goTime })),
+      bots: this.bots.map((b) => ({ rank: b.overall, time: this.solo ? null : (b.finishTime ?? this.time + (L - b.d) / Math.max(8 * S, b.speed)) - this.goTime })),
       rng: mulberry32(this.terrain.seed ^ 0x5c0e),
     });
     for (const b of this.bots) b.style = scores.bots.find((r) => r.rank === b.overall).style;
@@ -509,7 +510,7 @@ export class RaceScene {
     this.camera.lookAt(this._lookAt);
 
     // speed widens the lens gently — the "wind in your face" cue
-    const targetFov = 58 + this.player.speed * 0.22 + (this.player.airborne ? 2 : 0);
+    const targetFov = 58 + this.player.speed * (0.22 / S) + (this.player.airborne ? 2 : 0);
     const fov = this.camera.fov + (targetFov - this.camera.fov) * Math.min(1, dt * 2.2);
     if (Math.abs(fov - this.camera.fov) > 0.02) {
       this.camera.fov = fov;

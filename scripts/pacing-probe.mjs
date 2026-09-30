@@ -39,7 +39,7 @@ await page.evaluate((style) => {
     if (s > 1150 && s < 1160) want = 0.2; // parks briefly
     if (s > 1160 && s < 1400) want = 31; // sprints away
     P.speed += (want - P.speed) * Math.min(1, dt * (want < P.speed ? 3 : 1.2));
-    if (want < 1 && P.speed < 1.5) { P._parkT = (P._parkT || 0) + dt; if (P._parkT < 4) P.speed = 0; else P.speed = 6; }
+    if (want < 1 && P.speed < 1.5) { P._parkT = (P._parkT || 0) + dt; if (P._parkT < 4) P.speed = 0; else P.speed = 6 * (window.__fp.SPEED_SCALE ?? 1); }
     const ns = s + P.speed * dt;
     const x = t.centerAt(ns);
     P.pos.set(x, t.groundAt(x, -ns), -ns);

@@ -47,7 +47,7 @@ const putBotOnPlayer = (mode) => page.evaluate((m) => {
   if (m === 'botFast') bot.speed = race.player.speed + 14;
   else {
     bot.speed = 2;
-    race.player.speed = Math.max(race.player.speed, 18);
+    race.player.speed = Math.max(race.player.speed, 18 * (window.__fp.SPEED_SCALE ?? 1));
   }
   return race.bots.indexOf(bot);
 }, mode);

@@ -6,6 +6,9 @@
 //   tuck   bool    (hold W, or pull up and hold)
 // Discrete events (for tricks while airborne):
 //   onSwipe(dir)   dir in 'left' | 'right' | 'up' | 'down'
+// Latched one-shots (drained once per frame by whoever acts on them):
+//   consumeJump()  true on the frame after the jump was asked for —
+//                  SPACE on a keyboard, a single tap on a touchscreen
 // Timing helpers:
 //   lastTuckRelease  performance.now() ms of the last moment tuck was let go
 //                    (used for the "release at the lip for max pop" mechanic)
@@ -13,6 +16,13 @@
 const SWIPE_DIST = 46; // px of fast movement that counts as a trick swipe
 const HOLD_DIST_Y = 52; // px of sustained pull that engages tuck/brake
 const STEER_RANGE = 75; // px of horizontal pull for full steering lock
+// a tap is a touch that goes down and comes back up quickly without
+// travelling — anything longer or further is a hold or a swipe instead
+const TAP_MS = 260;
+const TAP_SLOP = 18; // px the finger may wander and still count as a tap
+// a jump asked for a beat before touchdown still fires on landing, so a
+// hop out of a landing does not have to be timed to the frame
+const JUMP_BUFFER = 150; // ms
 
 export class Input {
   constructor(target) {
@@ -21,6 +31,7 @@ export class Input {
     this.tuck = false;
     this.lastTuckRelease = -1e9;
     this.onSwipe = null;
+    this._jumpAt = -1e9; // when the last jump was asked for
 
     this._keys = new Set();
     this._touch = null; // { id, ax, ay, sx, sy, st } anchor + swipe segment origin
@@ -55,9 +66,26 @@ export class Input {
     window.removeEventListener('pointercancel', this._onPointerUp);
   }
 
+  /** Jump asked for and not yet acted on? Drains the request. */
+  consumeJump() {
+    if (performance.now() - this._jumpAt > JUMP_BUFFER) return false;
+    this._jumpAt = -1e9;
+    return true;
+  }
+
+  /** Forget a buffered jump (between scenes, or across a freeze). */
+  clearJump() {
+    this._jumpAt = -1e9;
+  }
+
   // ---------- keyboard ----------
   _keyDown(e) {
     const k = e.key.toLowerCase();
+    if (k === ' ' || e.code === 'Space') {
+      e.preventDefault(); // space scrolls the page otherwise
+      if (!e.repeat) this._jumpAt = performance.now();
+      return;
+    }
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
       e.preventDefault();
       if (!this._keys.has(k)) {
@@ -91,7 +119,10 @@ export class Input {
   _pointerDown(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (this._touch) return; // single-finger control
-    this._touch = { id: e.pointerId, ax: e.clientX, ay: e.clientY, sx: e.clientX, sy: e.clientY, st: performance.now() };
+    this._touch = {
+      id: e.pointerId, kind: e.pointerType, ax: e.clientX, ay: e.clientY, sx: e.clientX, sy: e.clientY,
+      st: performance.now(), down: performance.now(), far: 0, swiped: false,
+    };
   }
 
   _pointerMove(e) {
@@ -101,6 +132,7 @@ export class Input {
     // continuous: offset from anchor
     const dx = e.clientX - t.ax;
     const dy = e.clientY - t.ay;
+    t.far = Math.max(t.far, Math.hypot(dx, dy)); // how far this touch ever strayed
     this.steer = Math.max(-1, Math.min(1, dx / STEER_RANGE));
     const wasTuck = this.tuck;
     this.tuck = dy < -HOLD_DIST_Y;
@@ -114,6 +146,7 @@ export class Input {
     if (now - t.st < 260 && Math.hypot(sdx, sdy) > SWIPE_DIST) {
       const h = sdx > 0 ? 'right' : 'left';
       const v = sdy > 0 ? 'down' : 'up';
+      t.swiped = true;
       if (this.onSwipe) {
         // a diagonal flick is both directions at once — the special tricks
         // (the player reads two swipes landing together as one)
@@ -139,6 +172,12 @@ export class Input {
     const t = this._touch;
     if (!t || e.pointerId !== t.id) return;
     this._touch = null;
+    // a single tap — down and straight back up, going nowhere — is a jump.
+    // Holds (tuck/brake) and flicks (tricks) have already disqualified it.
+    // Touch only: on a mouse the jump is the space bar, so a stray click on
+    // the canvas does not launch the rider.
+    const now = performance.now();
+    if (t.kind !== 'mouse' && !t.swiped && t.far <= TAP_SLOP && now - t.down <= TAP_MS) this._jumpAt = now;
     if (this.tuck) this.lastTuckRelease = performance.now();
     this.steer = this._kbSteer || 0;
     this.tuck = false;

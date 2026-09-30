@@ -5,15 +5,28 @@ import * as THREE from 'three';
 import { createRider, setPose, landingBrace } from './riderMesh.js';
 import { tubeRadii, rockPenetration } from './terrain.js';
 import { clamp, lerp } from './rng.js';
+import { SPEED_SCALE as S } from './tuning.js';
 
 const G = 8; // arcade gravity along the slope — deep snow eats the pull
 const AIR_G = 15;
-const DRAG_K = 0.0095; // terminal ~ sqrt(G*grade/K) — roughly half the old pace
+// terminal ~ sqrt(G*grade/K): the drag coefficient carries SPEED_SCALE
+// squared so the top speed rises linearly while the pull off the mark —
+// pure gravity at a standstill — stays exactly what it was
+const DRAG_K = 0.0095 / (S * S);
 const TUCK_DRAG = 0.55;
-const BRAKE_DECEL = 14;
+const BRAKE_DECEL = 14 * S; // the brake keeps its bite at the higher pace
 const MAX_YAW = 1.15; // radians away from straight downhill
 const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
+const OLLIE_VY = 7.2; // the manual jump's kick: ~1.7 m up, ~0.95 s of air
 const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
+
+/**
+ * The fastest the rider can ever be travelling on a grade this steep —
+ * tucked, drag-limited, given unlimited room. Nothing the player does beats
+ * it, so the bots' guarantees only have to hold up to this, and it is the
+ * pace the determinism probe rides its ghost at.
+ */
+export const playerTopSpeed = (slope) => Math.sqrt((G * slope) / (DRAG_K * TUCK_DRAG));
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
 const HALF_NAMES = { left: 'Backside 180', right: 'Frontside 180' };
@@ -197,7 +210,7 @@ export class Player {
     const knocked = Math.max(0, Math.min(1, Math.min(this.knockT * 3, (1.7 - this.knockT) * 4)));
     // after the line: ride it out with a hockey stop, then stand
     if (this.finished) {
-      this.speed = Math.max(0, this.speed - 11 * dt);
+      this.speed = Math.max(0, this.speed - 11 * S * dt);
       const dir = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const nx = this.pos.x + dir.x * this.speed * dt;
       const nz = this.pos.z + dir.z * this.speed * dt;
@@ -205,19 +218,25 @@ export class Player {
       this.airborne = false;
       this._sync(dt);
       setPose(this.rider, {
-        brake: this.speed > 1.5 ? 1 : 0,
-        idle: this.speed <= 1.5,
+        brake: this.speed > 1.5 * S ? 1 : 0,
+        idle: this.speed <= 1.5 * S,
         t: this.t,
         dt,
       });
       return;
     }
 
+    // the manual jump is asked for by SPACE or a single tap. Drain it here,
+    // once a frame, whether or not it can be used — a request that arrives
+    // mid-flight is spent rather than saved up for the landing
+    const wantsJump = inp.consumeJump();
+
     const stumbling = this.stumbleT > 0 || this.knockT > 0;
     if (this.stumbleT > 0) this.stumbleT -= dt;
     if (this.immuneT > 0) this.immuneT -= dt;
     if (this._boostT > 0) this._boostT -= dt;
     const prevS = this.progress;
+    const prevX = this.pos.x, prevZ = this.pos.z;
     // the landing brace runs its course from touchdown: sink, push, settle
     if (this._landT >= 0) {
       this._landT += dt;
@@ -245,7 +264,7 @@ export class Player {
       this.edge = lerp(this.edge, clamp(steerIn, -1, 1), clamp(dt * 2.4, 0, 1));
       // turn rate scaled to the slower snow: full edge at cruise draws a
       // long ~15-20m arc instead of a twitchy pivot
-      const carveRate = this.edge * (0.55 + 0.75 * clamp(this.speed / 24, 0, 1.2));
+      const carveRate = this.edge * S * (0.55 + 0.75 * clamp(this.speed / (24 * S), 0, 1.2));
       this.yaw += carveRate * dt;
       // gravity pulls the line back to the fall line — gently mid-carve,
       // firmly once the edge is released
@@ -260,11 +279,11 @@ export class Player {
       const braking = this.input.brake && !stumbling;
       let grip;
       if (this.isSled) {
-        grip = (4.2 - 2.6 * clamp(this.speed / 40, 0, 1)) * 0.7 * (braking ? 0.55 : 1);
+        grip = (4.2 - 2.6 * clamp(this.speed / (40 * S), 0, 1)) * 0.7 * (braking ? 0.55 : 1);
       } else if (braking) {
         grip = 2.0;
       } else {
-        grip = 8.5 - 2.2 * clamp(this.speed / 40, 0, 1);
+        grip = 8.5 - 2.2 * clamp(this.speed / (40 * S), 0, 1);
       }
       if (stumbling) grip *= 0.7;
       const prevTravel = this.travelYaw;
@@ -295,8 +314,8 @@ export class Player {
       const k = DRAG_K * (tucking ? TUCK_DRAG : 1) * (braking ? (railApproach ? 1.4 : 4) : 1) * (this._boostT > 0 ? 0.35 : 1);
       a -= k * this.speed * this.speed;
       if (braking) a -= BRAKE_DECEL * (railApproach ? 0.18 : 1);
-      if (stumbling) a -= 6;
-      if (this.knockT > 0) a -= 10; // sliding on your side scrubs hard
+      if (stumbling) a -= 6 * S;
+      if (this.knockT > 0) a -= 10 * S; // sliding on your side scrubs hard
 
       // never stuck: at a crawl, leaning forward skates/poles you up to
       // walking pace anywhere — the push also cancels uphill gravity so even
@@ -306,7 +325,7 @@ export class Player {
       }
 
       // fresh brake press throws a plume off the now-sideways edge
-      if (braking && !this._wasBraking && this.fx && this.speed > 8) {
+      if (braking && !this._wasBraking && this.fx && this.speed > 8 * S) {
         const side = Math.sign(inp.steer) || 1;
         this.fx.burst(this.pos, { x: side * -dir.z, z: side * dir.x }, {
           count: 130, speed: 5, up: 3, spread: 1.1, size: 0.24,
@@ -343,7 +362,7 @@ export class Player {
       // ---- log grind: brake sideways onto a rail at the lip, carry the
       // momentum along it, trick off the end over the drop ----
       let grinding = false;
-      if (inp.brake && !stumbling && this.speed > 5) {
+      if (inp.brake && !stumbling && this.speed > 5 * S) {
         const gr = t.grindAt(nx, -nz);
         if (gr && (this._grindT > 0 || this.pos.y > gr.topY - 1.4)) {
           grinding = true;
@@ -379,7 +398,7 @@ export class Player {
       // would read a kicker as a fall
       const climbVy = this.groundVy;
       const rate = dt > 0 ? (ground - this.pos.y) / dt : 0;
-      this.groundVy = lerp(this.groundVy, clamp(rate, -30, 30), clamp(dt * 10, 0, 1));
+      this.groundVy = lerp(this.groundVy, clamp(rate, -30 * S, 30 * S), clamp(dt * 10, 0, 1));
 
       // half-pipe lip: carrying speed up the near-vertical wall boosts you
       // off the lip — outward momentum converts to straight-up pop, so the
@@ -387,7 +406,7 @@ export class Player {
       const pp = t.pipeAt(nx, -nz);
       let lipLaunch = false;
       if (pp && Math.abs(pp.q) >= pp.lipQ && this._prevPipeQ != null && Math.abs(this._prevPipeQ) < pp.lipQ
-          && this.groundVy > 3 && this.speed > 7) {
+          && this.groundVy > 3 * S && this.speed > 7 * S) {
         lipLaunch = true;
         this.airborne = true;
         this.vy = clamp(this.groundVy * 0.9, 5, 13);
@@ -410,13 +429,13 @@ export class Player {
 
       if (lipLaunch) {
         // airborne now — skip ground follow, collisions come back on landing
-      } else if (ground < this.pos.y - Math.max(0.55, 0.9 * this.speed * dt) && this.speed > 6) {
+      } else if (ground < this.pos.y - Math.max(0.55, 0.9 * this.speed * dt) && this.speed > 6 * S) {
         // (the threshold grows with the step so a long frame on a steep
         // grade — low fps at speed — never reads as the ground falling away)
         // ground fell away — takeoff
         this.airborne = true;
         this.vy = clamp(climbVy, 0, t.launchCapAt(-nz)); // the Big Air lip throws harder
-        if (braking && this.speed > 8) {
+        if (braking && this.speed > 8 * S) {
           // the knuckle huck: drifting the lip sideways kills the kick the
           // ramp would have given, but the run carries — a low, long,
           // floating flight (the tricks in it pay more)
@@ -435,12 +454,29 @@ export class Player {
         this.vy = 0;
       }
 
-      if (!this.airborne) this._collide();
+      // ---- the manual jump: pop off the snow anywhere, no lip needed ----
+      // It opens the trick window on flat ground and clears an obstacle you
+      // saw late. Popping off a lip still throws harder, so this never
+      // replaces riding the terrain — and a rider who is down cannot use it.
+      if (wantsJump && !this.airborne && !stumbling) {
+        this.airborne = true;
+        this.vy = OLLIE_VY;
+        // the crouch and spring cost a little run — the same scrub a real
+        // ollie costs, so spamming it down the fall line is slower than
+        // riding it out
+        this.speed = Math.max(0, this.speed - 0.6 * S);
+        this.pos.set(this.pos.x, this.pos.y + this.vy * dt, this.pos.z);
+        if (this.fx) {
+          this.fx.burst(this.pos, dir, { count: 26, speed: 3, up: 3.2, spread: 1.3, size: 0.22 });
+        }
+      }
+
+      if (!this.airborne) this._collide(prevX, prevZ);
       // threading a boost gate: a kick now, slipstream for a moment after
       if (!this.airborne && !stumbling) {
         const g = t.boostGateAt(this.pos.x, prevS, this.progress);
         if (g) {
-          this.speed = Math.min(this.speed + 7, 46);
+          this.speed = Math.min(this.speed + 7 * S, 46 * S);
           this._boostT = 1.6;
           t.flashGate(g);
           if (this.hud) this.hud.trickToast('BOOST!', 'gate threaded');
@@ -517,7 +553,7 @@ export class Player {
           this.stumble(this.pending > 0 ? `crashed the landing — lost ${this.pending}` : 'crashed the landing');
           this.pending = 0;
         } else if (this.combo.length) {
-          this.speed += 1.5; // clean landing keeps momentum
+          this.speed += 1.5 * S; // clean landing keeps momentum
           const wasSwitch = this.switchRide;
           if (switchLanding) {
             // the spin only got halfway: it was a 180 all along
@@ -560,14 +596,14 @@ export class Player {
     }
 
     // continuous powder: wake at speed, roost off the drifting edge
-    if (this.fx && !this.airborne && !(this._grindT > 0) && this.speed > 7) {
+    if (this.fx && !this.airborne && !(this._grindT > 0) && this.speed > 7 * S) {
       // a railing edge under load throws its own clean plume even with no
       // slip; sliding (slip) and braking still roost the most
-      const carve = Math.abs(this.slip) * 2.2 + Math.abs(this.latA) / 11 + (Math.abs(this.yaw) / MAX_YAW) * 0.25;
+      const carve = Math.abs(this.slip) * 2.2 + Math.abs(this.latA) / (11 * S * S) + (Math.abs(this.yaw) / MAX_YAW) * 0.25;
       const braking = inp.brake && !stumbling ? 1 : 0;
       const intensity = 0.15 + carve * 1.6 + braking * 3 + (stumbling ? 2 : 0);
       // finer grains, more of them: a mist rather than a few big puffs
-      const rate = intensity * this.speed * 0.9;
+      const rate = intensity * this.speed * (0.9 / S);
       this._sprayAcc = (this._sprayAcc || 0) + rate * dt * 60;
       const side = Math.sign(this.yaw) || (Math.random() < 0.5 ? -1 : 1);
       while (this._sprayAcc >= 1) {
@@ -589,8 +625,8 @@ export class Player {
     // deep frontside carve: the trailing mitt brushes the snow and leaves
     // its own thin feather of spray behind the hand
     const mitt = this.rider.mittDrag ?? 0;
-    if (this.fx && !this.airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8) {
-      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * 0.26 * dt * 60;
+    if (this.fx && !this.airborne && mitt > 0.4 && this.rider.mittWorld && this.speed > 8 * S) {
+      this._mittAcc = (this._mittAcc || 0) + mitt * this.speed * (0.26 / S) * dt * 60;
       const mw = this.rider.mittWorld;
       while (this._mittAcc >= 1) {
         this._mittAcc -= 1;
@@ -630,7 +666,7 @@ export class Player {
       brake: inp.brake && !stumbling ? 1 : 0,
       // lean comes from the actual centripetal force of the carve — felt
       // the other way round by a body riding backwards
-      steer: clamp(this.latA / 11, -1, 1) * (this.switchRide ? -1 : 1),
+      steer: clamp(this.latA / (11 * S * S), -1, 1) * (this.switchRide ? -1 : 1),
       switchRide: this.switchRide,
       lookSide: this._lookSide,
       special: this._special ? { kind: this._special.kind, amt: spAmt } : null,
@@ -641,8 +677,8 @@ export class Player {
       knocked,
       airborne: this.airborne,
       crouch: clamp(this.landComp + this.bump, -0.2, 1), // a little negative: the rebound past standing
-      speedNorm: clamp(this.speed / 26, 0, 1),
-      longG: clamp(this.longA / 11, -1, 1),
+      speedNorm: clamp(this.speed / (26 * S), 0, 1),
+      longG: clamp(this.longA / (11 * S), -1, 1),
       jolt: this.bump * 1.3,
       twist: this.twist ?? 0,
       curl: this.curl ?? 0,
@@ -726,20 +762,39 @@ export class Player {
     }
   }
 
-  _collide() {
+  /**
+   * Obstacles, swept along the step just taken rather than sampled at its
+   * end: at the top pace one frame covers several metres, and a boulder
+   * narrower than that would otherwise be stepped straight over.
+   */
+  _collide(fromX = this.pos.x, fromZ = this.pos.z) {
     // just been down: a short grace so a rider dropped into a thicket rides
     // out of it instead of bouncing tree to tree
     if (this.stumbleT > 0 || this.immuneT > 0) return;
     const s = this.progress;
-    for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
-      const dx = this.pos.x - o.x;
-      const dz = this.pos.z - o.z;
+    const prevS = -fromZ;
+    const travel = Math.hypot(this.pos.x - fromX, this.pos.z - fromZ);
+    const steps = Math.min(8, Math.max(1, Math.ceil(travel / 0.6)));
+    const lo = Math.min(s, prevS) - 6;
+    const hi = Math.max(s, prevS) + 6;
+    for (const o of this.terrain.obstaclesNear(lo, hi)) {
+      // the closest the step ever came to this obstacle
+      let dx = this.pos.x - o.x;
+      let dz = this.pos.z - o.z;
+      let best = dx * dx + dz * dz;
+      for (let i = 1; i < steps; i++) {
+        const f = i / steps;
+        const cx = fromX + (this.pos.x - fromX) * f - o.x;
+        const cz = fromZ + (this.pos.z - fromZ) * f - o.z;
+        const d2 = cx * cx + cz * cz;
+        if (d2 < best) { best = d2; dx = cx; dz = cz; }
+      }
       if (o.kind === 'rock') {
         // boulders hit on their own outline (yawed and scaled like the
         // instance), plus a shoulder's width — riding past one clean stays
         // clean. r is only the broad phase.
         const r = o.r + ROCK_PAD;
-        if (dx * dx + dz * dz > r * r) continue;
+        if (best > r * r) continue;
         const hit = rockPenetration(o, dx, dz);
         if (hit.depth > -ROCK_PAD) {
           this.stumble('hit a boulder');
@@ -750,7 +805,7 @@ export class Player {
         continue;
       }
       const r = o.r + 0.7;
-      if (dx * dx + dz * dz < r * r) {
+      if (best < r * r) {
         this.stumble(o.kind === 'tree' ? 'clipped a tree' : 'slammed a log');
         // shove clear so we don't re-trigger
         const d = Math.max(0.1, Math.hypot(dx, dz));

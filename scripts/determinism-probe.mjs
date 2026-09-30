@@ -13,11 +13,14 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 const page = await browser.newPage({ viewport: { width: 480, height: 320 } });
 page.on('pageerror', (e) => console.error('pageerror:', e));
 
+// The pace scripts are written at the game's base speed scale and stretched
+// to whatever the mountain currently runs at, so "flat out" always means the
+// physics ceiling rather than a number that used to be it.
 const SCRIPTS = {
-  flatout: (s) => 46,
-  crawl: (s) => 11,
-  stopLate: (s) => (s > 1690 && s < 1700 ? 0 : 27),
-  stopLateThenSprint: (s) => (s > 1650 && s < 1660 ? 0 : s > 1660 ? 46 : 22),
+  flatout: (s, S) => 46 * S,
+  crawl: (s, S) => 11 * S,
+  stopLate: (s, S) => (s > 1690 && s < 1700 ? 0 : 27 * S),
+  stopLateThenSprint: (s, S) => (s > 1650 && s < 1660 ? 0 : s > 1660 ? 46 * S : 22 * S),
 };
 const formats = (process.env.FORMATS || 'race,combined').split(',');
 const scripts = (process.env.SCRIPTS || Object.keys(SCRIPTS).join(',')).split(',');
@@ -37,13 +40,39 @@ for (const format of formats) {
         const P = r.player;
         const t = r.terrain;
         const L = t.length;
-        const want = new Function('s', `return (${fn})(s)`);
+        const S = window.__fp.SPEED_SCALE ?? 1;
+        // Calibrate the ghost against the real thing: ride the actual player
+        // physics down this course tucked flat out and take the peak. The
+        // scripted paces are then capped just above it, so "flat out" means
+        // as fast as anyone could possibly ride rather than a speed the
+        // physics cannot produce — riding it faster tests the backstops
+        // instead of the pacing, and reports snaps no real run can provoke.
+        const ceiling = await (async () => {
+          const realUpdate = P.update.bind(P);
+          const x0 = t.centerAt(30);
+          P.pos.set(x0, t.groundAt(x0, -30), -30);
+          P.speed = 0; P.yaw = P.travelYaw = 0; P.airborne = false; P.immuneT = 1e9;
+          r.input.tuck = true;
+          let peak = 0;
+          for (let i = 0; i < 4000; i++) {
+            realUpdate(0.05);
+            peak = Math.max(peak, P.speed);
+            if (P.progress > L - 120) { const keep = P.speed; P.pos.set(x0, t.groundAt(x0, -30), -30); P.speed = keep; P.finished = false; }
+            if (i % 400 === 0) await new Promise((k) => requestAnimationFrame(k));
+          }
+          r.input.tuck = false;
+          // back to the gate for the scripted run
+          P.pos.set(t.centerAt(4), t.groundAt(t.centerAt(4), -4), -4);
+          P.speed = 0; P.finished = false; P.style = 0; P.immuneT = 0;
+          return peak * 1.05;
+        })();
+        const want = new Function('s', 'S', `return (${fn})(s, S)`);
         let stopT = 0;
         P.update = (dt) => {
           if (P.finished) return;
           const s = P.progress;
-          let w = want(s);
-          if (w === 0) { stopT += dt; if (stopT > 20) w = 27; } // a stop lasts 20 s, then on
+          let w = Math.min(want(s, S), ceiling);
+          if (w === 0) { stopT += dt; if (stopT > 20) w = Math.min(27 * S, ceiling); } // a stop lasts 20 s, then on
           P.speed += (w - P.speed) * Math.min(1, dt * (w < P.speed ? 4 : 2));
           const ns = s + P.speed * dt;
           const x = t.centerAt(ns);
@@ -86,6 +115,7 @@ for (const format of formats) {
           bigPos: document.querySelector('.big-pos')?.textContent, rows, totals,
           balance: JSON.parse(localStorage.getItem('freshpow_save_v1'))?.balance,
           maxJump: +maxJump.toFixed(1), jumpWho, style: P.style, time: +(r.playerClock ?? 0).toFixed(1), snaps: window.__snaps || [],
+          ceiling: +ceiling.toFixed(1),
         };
       }, [SCRIPTS[name].toString(), format === 'combined' && k % 2 ? 1200 : 0]);
       const totals = res.totals;
@@ -95,7 +125,7 @@ for (const format of formats) {
         && Math.abs(res.balance - (before - res.bet + res.payout)) < 0.01;
       if (!ok) fails++;
       if (res.snaps.length) console.log('   snaps:', JSON.stringify(res.snaps));
-      console.log(`${ok ? 'OK  ' : 'FAIL'} ${format}/${name}#${k}: drawn ${res.drawn} planned ${res.planned} crossed ${res.crossed} shown ${res.bigPos} time ${res.time}s style ${res.style} maxJump ${res.maxJump} m (${res.jumpWho}) | ${res.crossing.join(' ')}${format === 'combined' ? ` | ${res.rows.join(' | ')}` : ''}`);
+      console.log(`${ok ? 'OK  ' : 'FAIL'} ${format}/${name}#${k}: ceiling ${res.ceiling} m/s drawn ${res.drawn} planned ${res.planned} crossed ${res.crossed} shown ${res.bigPos} time ${res.time}s style ${res.style} maxJump ${res.maxJump} m (${res.jumpWho}) | ${res.crossing.join(' ')}${format === 'combined' ? ` | ${res.rows.join(' | ')}` : ''}`);
     }
   }
 }

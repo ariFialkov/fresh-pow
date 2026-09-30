@@ -60,6 +60,13 @@ The racing *feels* like a skill game, but the result is drawn before the gates o
 - **Tricks** — swipe (or tap WASD) in the air for spins and flips; chain swipes for combos.
   Release your tuck right at the lip for extra pop. Land mid-rotation and you crash.
   Style points are cosmetic — they never touch the payout.
+- **Jumping** — a single tap (or `SPACE`) pops the rider off the snow anywhere, no lip needed:
+  enough air to open the trick window on a flat pitch, or to clear something you saw late.
+  It costs a little run, and riding a real lip still throws much harder.
+- **Speed** — one constant, `SPEED_SCALE` in [`src/game/tuning.js`](src/game/tuning.js), sets
+  how fast the whole mountain runs: the player's drag-limited top speed and the bots' paces
+  together. Acceleration stays out of it, so raising the top end does not change the pull off
+  the mark — it just takes longer to get there.
 
 ## Controls
 
@@ -68,8 +75,15 @@ The racing *feels* like a skill game, but the result is drawn before the gates o
 | Carve left/right | pull left/right | `A` / `D` |
 | Tuck (speed) | pull up + hold | hold `W` |
 | Brake / hard stop | pull down + hold | hold `S` |
+| Jump | single tap | `SPACE` |
 | Tricks (airborne) | swipe any direction | tap `W`/`A`/`S`/`D` |
+| Specials (airborne) | diagonal swipe | two direction keys together |
 | Max jump pop | release tuck right at the lip | release `W` at the lip |
+| Knuckle huck | brake into the lip | brake into the lip |
+
+A tap is a touch that goes down and straight back up without travelling, so it can never be
+confused with a hold (tuck/brake) or a flick (a trick). A mouse click is not a jump — on a
+desktop the jump is the space bar.
 
 ## Development
 
