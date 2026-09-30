@@ -16,4 +16,11 @@
 //
 // The player's terminal speed is sqrt(G * grade / DRAG_K), so the drag
 // coefficient falls as the SQUARE of this to raise the top speed linearly.
-export const SPEED_SCALE = 2.25;
+//
+// It ships at 1: the pace the game was tuned and playtested at. Everything
+// it touches is a plain multiplication, so at 1 every term is exactly the
+// value it had before this knob existed — this is the mountain's real speed,
+// not a scaled-down version of a faster one. Raising it works, but 2.25 was
+// tried and made the game markedly harder to read and to ride, so treat
+// anything above 1 as an experiment.
+export const SPEED_SCALE = 1;

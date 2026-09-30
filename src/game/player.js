@@ -9,24 +9,17 @@ import { SPEED_SCALE as S } from './tuning.js';
 
 const G = 8; // arcade gravity along the slope — deep snow eats the pull
 const AIR_G = 15;
-// terminal ~ sqrt(G*grade/K): the drag coefficient carries SPEED_SCALE
-// squared so the top speed rises linearly while the pull off the mark —
-// pure gravity at a standstill — stays exactly what it was
+// terminal ~ sqrt(G*grade/K) — roughly half the old pace. The drag
+// coefficient carries SPEED_SCALE squared, so that knob moves the top speed
+// linearly and leaves the pull off the mark (pure gravity at a standstill)
+// exactly where it is. At the shipped scale of 1 this is the tuned value.
 const DRAG_K = 0.0095 / (S * S);
 const TUCK_DRAG = 0.55;
-const BRAKE_DECEL = 14 * S; // the brake keeps its bite at the higher pace
+const BRAKE_DECEL = 14 * S; // scaled so the brake keeps its bite at any pace
 const MAX_YAW = 1.15; // radians away from straight downhill
 const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
 const OLLIE_VY = 7.2; // the manual jump's kick: ~1.7 m up, ~0.95 s of air
 const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
-
-/**
- * The fastest the rider can ever be travelling on a grade this steep —
- * tucked, drag-limited, given unlimited room. Nothing the player does beats
- * it, so the bots' guarantees only have to hold up to this, and it is the
- * pace the determinism probe rides its ghost at.
- */
-export const playerTopSpeed = (slope) => Math.sqrt((G * slope) / (DRAG_K * TUCK_DRAG));
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
 const HALF_NAMES = { left: 'Backside 180', right: 'Frontside 180' };
@@ -236,7 +229,6 @@ export class Player {
     if (this.immuneT > 0) this.immuneT -= dt;
     if (this._boostT > 0) this._boostT -= dt;
     const prevS = this.progress;
-    const prevX = this.pos.x, prevZ = this.pos.z;
     // the landing brace runs its course from touchdown: sink, push, settle
     if (this._landT >= 0) {
       this._landT += dt;
@@ -471,7 +463,7 @@ export class Player {
         }
       }
 
-      if (!this.airborne) this._collide(prevX, prevZ);
+      if (!this.airborne) this._collide();
       // threading a boost gate: a kick now, slipstream for a moment after
       if (!this.airborne && !stumbling) {
         const g = t.boostGateAt(this.pos.x, prevS, this.progress);
@@ -762,39 +754,20 @@ export class Player {
     }
   }
 
-  /**
-   * Obstacles, swept along the step just taken rather than sampled at its
-   * end: at the top pace one frame covers several metres, and a boulder
-   * narrower than that would otherwise be stepped straight over.
-   */
-  _collide(fromX = this.pos.x, fromZ = this.pos.z) {
+  _collide() {
     // just been down: a short grace so a rider dropped into a thicket rides
     // out of it instead of bouncing tree to tree
     if (this.stumbleT > 0 || this.immuneT > 0) return;
     const s = this.progress;
-    const prevS = -fromZ;
-    const travel = Math.hypot(this.pos.x - fromX, this.pos.z - fromZ);
-    const steps = Math.min(8, Math.max(1, Math.ceil(travel / 0.6)));
-    const lo = Math.min(s, prevS) - 6;
-    const hi = Math.max(s, prevS) + 6;
-    for (const o of this.terrain.obstaclesNear(lo, hi)) {
-      // the closest the step ever came to this obstacle
-      let dx = this.pos.x - o.x;
-      let dz = this.pos.z - o.z;
-      let best = dx * dx + dz * dz;
-      for (let i = 1; i < steps; i++) {
-        const f = i / steps;
-        const cx = fromX + (this.pos.x - fromX) * f - o.x;
-        const cz = fromZ + (this.pos.z - fromZ) * f - o.z;
-        const d2 = cx * cx + cz * cz;
-        if (d2 < best) { best = d2; dx = cx; dz = cz; }
-      }
+    for (const o of this.terrain.obstaclesNear(s - 6, s + 6)) {
+      const dx = this.pos.x - o.x;
+      const dz = this.pos.z - o.z;
       if (o.kind === 'rock') {
         // boulders hit on their own outline (yawed and scaled like the
         // instance), plus a shoulder's width — riding past one clean stays
         // clean. r is only the broad phase.
         const r = o.r + ROCK_PAD;
-        if (best > r * r) continue;
+        if (dx * dx + dz * dz > r * r) continue;
         const hit = rockPenetration(o, dx, dz);
         if (hit.depth > -ROCK_PAD) {
           this.stumble('hit a boulder');
@@ -805,7 +778,7 @@ export class Player {
         continue;
       }
       const r = o.r + 0.7;
-      if (best < r * r) {
+      if (dx * dx + dz * dz < r * r) {
         this.stumble(o.kind === 'tree' ? 'clipped a tree' : 'slammed a log');
         // shove clear so we don't re-trigger
         const d = Math.max(0.1, Math.hypot(dx, dz));

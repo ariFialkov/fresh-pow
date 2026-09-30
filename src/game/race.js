@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Terrain, rockPenetration } from './terrain.js';
 import { FORMATS, liveBotStyle, settleScores } from './formats.js';
-import { Player, playerTopSpeed } from './player.js';
+import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { RaceHud, showResults } from './hud.js';
 import { makeSky, addLights, aimSun, Snowfall } from './world.js';
@@ -163,7 +163,7 @@ export class RaceScene {
     this._updateCamera(1, true);
 
     // debug/test hook (also handy in devtools)
-    window.__fp = { race: this, rockPenetration, SPEED_SCALE: S, playerTopSpeed };
+    window.__fp = { race: this, rockPenetration, SPEED_SCALE: S };
   }
 
   onBotFinish(bot) {

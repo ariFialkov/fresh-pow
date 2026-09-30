@@ -66,7 +66,10 @@ The racing *feels* like a skill game, but the result is drawn before the gates o
 - **Speed** — one constant, `SPEED_SCALE` in [`src/game/tuning.js`](src/game/tuning.js), sets
   how fast the whole mountain runs: the player's drag-limited top speed and the bots' paces
   together. Acceleration stays out of it, so raising the top end does not change the pull off
-  the mark — it just takes longer to get there.
+  the mark — it just takes longer to get there. It ships at `1`, the pace the game was tuned
+  and playtested at; everything it touches is a plain multiplication, so at `1` every term is
+  exactly its tuned value. Raising it does work, but it was tried at `2.25` and made the game
+  markedly harder to read and ride, so treat anything above `1` as an experiment.
 
 ## Controls
 
