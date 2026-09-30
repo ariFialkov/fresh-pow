@@ -12,6 +12,11 @@ import { createCharacter, MODEL_SCALE } from './characters.js';
 const SKIN = 0xd9a878;
 const THIGH_L = 0.41;
 const CALF_L = 0.39;
+// ollie timings: how long the rider loads the knees before leaving the snow,
+// how long the extension takes, and how long it settles back afterwards
+export const OLLIE_WIND = 0.11;
+const OLLIE_POP = 0.13;
+const OLLIE_SETTLE = 0.2;
 
 const geoCache = new Map();
 const matCache = new Map();
@@ -349,7 +354,7 @@ export function createRider(gear, helmetColor, outfit = null) {
     _brakeSmooth: 0,
     _brakeSide: 1,
     _wasBraking: false,
-    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0, twist: 0, curl: 0, sp: 0, drift: 0 },
+    _s: { tuck: 0, brakeIn: 0, steer: 0, stumble: 0, knocked: 0, crouch: 0, air: 0, shift: 0, twist: 0, curl: 0, sp: 0, drift: 0, ollie: 0 },
   };
   setPose(rider, { idle: true, t: 0, dt: 1 }); // dt=1 converges the damping instantly
   return rider;
@@ -555,6 +560,35 @@ export function landingBrace(tau, amp) {
 }
 
 /**
+ * The ollie: load, pop, settle. Returns a SIGNED spring — positive is the
+ * crouch loading up before the rider leaves the snow, negative is the drive
+ * through standing into a full extension, fading back to the ride stance.
+ * The mirror image of landingBrace, which soaks a hit instead of making one.
+ * @param tau seconds since the jump was asked for
+ * @param wind how long the load lasts before the pop
+ */
+export function ollieSpring(tau, wind = OLLIE_WIND) {
+  if (tau < 0) return 0;
+  // load: sink into the knees, bottoming out just before the pop so the
+  // joints — which lag the envelope by a frame or two — are at their
+  // deepest on the frame the rider actually leaves the snow
+  if (tau < wind) {
+    const u = Math.min(1, tau / (wind * 0.72));
+    return u * u * (3 - 2 * u);
+  }
+  const v = tau - wind;
+  if (v > OLLIE_POP + OLLIE_SETTLE) return 0;
+  // pop: drive up through standing and past it, legs straightening out
+  if (v < OLLIE_POP) {
+    const u = v / OLLIE_POP;
+    return 1 - 2.4 * (u * u * (3 - 2 * u));
+  }
+  // settle: fold back to the stance the rider rides in
+  const u = (v - OLLIE_POP) / OLLIE_SETTLE;
+  return -1.4 * (1 - u * u * (3 - 2 * u));
+}
+
+/**
  * Drives every joint from a handful of gameplay params.
  * @param {object} p
  *   tuck/brake/stumble/knocked 0..1, steer -1..1, airborne bool, idle bool,
@@ -580,6 +614,9 @@ export function setPose(rider, p = {}) {
   S.curl = ease(S.curl, p.curl ?? 0, 8); // flip rate while tricking
   S.sp = ease(S.sp, p.special ? p.special.amt : 0, 12); // a special's body shape, in and out
   S.drift = ease(S.drift, p.drift ?? 0, 6); // the knuckle-huck float
+  // the ollie is already a shaped envelope, so it only needs enough easing
+  // to stay continuous if the clock is cut short
+  S.ollie = ease(S.ollie, p.ollie ?? 0, 30);
   if (p.special) rider._spKind = p.special.kind;
   const tuck = S.tuck, steer = S.steer, stumble = S.stumble, knocked = S.knocked, crouch = S.crouch, air = S.air;
   const shift = S.shift;
@@ -601,6 +638,15 @@ export function setPose(rider, p = {}) {
   const sp = S.sp;
   const spK = rider._spKind;
   const drift = S.drift;
+  // split the signed ollie spring into its two halves: loading and popping
+  const oLoad = Math.max(0, S.ollie);
+  const oPop = Math.max(0, -S.ollie);
+  // an ollie is over in about a third of a second, far quicker than the
+  // joints' resting springs can track — they are tuned to lag like flesh,
+  // which is right for everything else and would swallow this whole. So the
+  // joints it drives stiffen for exactly as long as it is running.
+  const oAmp = Math.max(oLoad, oPop);
+  const oStiff = (om) => om + oAmp * 34;
 
   // ---- output springs: joints carry inertia. Loose parts (arms, head,
   // poles) lag and overshoot like flesh reacting to forces; legs stay
@@ -619,6 +665,11 @@ export function setPose(rider, p = {}) {
       else g.rotation[axis] = target;
       return;
     }
+    // a stiff spring stepped with a long frame diverges — the correction
+    // overshoots further than the error it was correcting. Cap the stiffness
+    // against the frame length so a slow device gets a softer, stable joint
+    // instead of a body flung off the rig. At 60 fps this never binds.
+    om = Math.min(om, 1.6 / Math.max(dt, 1e-4));
     const acc = om * om * (target - cur) - 2 * zt * om * sv[axis];
     sv[axis] += acc * dt;
     const nv = cur + sv[axis] * dt;
@@ -777,7 +828,14 @@ export function setPose(rider, p = {}) {
     : (isBoard ? 0.26 : 0.32) + Math.abs(steer) * 0.28 + fsDrag * 0.4 + tuck * (isBoard ? 0.42 : 0.5) + crouch * (isBoard ? 0.45 : 0.6) + brake * 0.25 + knocked * 0.9;
   // specials fold or stretch the legs; a knuckle float rides low and loose
   const spKnee = sp * (spK === 'jackknife' ? 0.9 : spK === 'grab' ? 0.45 : spK === 'superman' ? -0.5 : 0);
-  const kneeBend = kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25 + spKnee + drift * 0.35) * air;
+  // the ollie rides on top of the ground/air blend rather than inside it:
+  // the pop happens across the moment of leaving the snow, and folding it
+  // into the ground term alone would let the airborne stance cancel the
+  // extension exactly as it becomes visible. Clamped at straight — the leg
+  // solve is symmetric in the knee angle, so a negative bend would read as
+  // a bend the other way rather than a longer leg.
+  const kneeBend = Math.max(0, kneeGround * (1 - air) + ((isBoard ? 0.55 : 0.75) + crouch * 0.2 + curl * 0.5 + Math.abs(twist) * 0.25 + spKnee + drift * 0.35) * air
+    + oLoad * 0.8 - oPop * 0.9);
 
   // the legs are IK-solved to the binding anchors (applySkeleton); the pose
   // only decides how LOW the pelvis rides, which is what sets the knee bend
@@ -786,7 +844,7 @@ export function setPose(rider, p = {}) {
   const legVSum = 2 * (THIGH_L * Math.cos(a) + CALF_L * Math.cos(b - a));
   // solve pelvis height so soles land on the deck (0.16 ankle->deck stack,
   // 0.05 hip offset inside the pelvis)
-  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.03 : 0) - air * 0.12 - knocked * 0.35);
+  PY(parts.pelvis, legVSum / 2 + 0.16 + 0.05 + (isBoard ? 0.03 : 0) - air * 0.12 * (1 - oPop) - knocked * 0.35, oStiff(14), 0.9);
   // center of gravity slides fore/aft over the deck with the weight shift
   PZ(parts.pelvis, -shift * 0.11);
   // ski angulation: the hips slide INTO the turn over the inside ski, which
@@ -833,7 +891,7 @@ export function setPose(rider, p = {}) {
   // acceleration G presses the body upright/back — but a tucked rider is
   // braced hard forward, so the tuck largely overrides that press
   const gBrace = 1 - tuck * 0.8;
-  RX(parts.spine, spineBase * 0.45 + brace * 0.26 + wobS * 0.5 + longG * -0.28 * gBrace + swayB * 0.4, 9, 0.65);
+  RX(parts.spine, spineBase * 0.45 + brace * 0.26 + oLoad * 0.26 - oPop * 0.16 + wobS * 0.5 + longG * -0.28 * gBrace + swayB * 0.4, oStiff(9), 0.65);
   // skiers angulate: the torso stays upright over the driven hips, so its
   // roll runs slightly AGAINST the lean; boarders bank with the body
   RZ(parts.spine, steer * (isBoard ? -0.12 : 0.08) + wobS * 0.3 + swayA * 0.6, 9, 0.65);
@@ -967,11 +1025,19 @@ export function setPose(rider, p = {}) {
       ex = ex * (1 - air) + aex * air;
       wx = wx * (1 - air) + -0.2 * air;
     }
+    // the ollie's arm swing: hands come up and in tight against the body
+    // over the load, then sweep down and back past the hips, elbows opening
+    // out — the throw that drives the rider up off the snow
+    sx += oLoad * 0.6 - oPop * 1.05;
+    sz -= arm.side * (oLoad * 0.3 - oPop * 0.12);
+    ex += oLoad * 0.8 - oPop * 0.5;
+    wx += oLoad * 0.3 - oPop * 0.25;
+
     // arms are loose masses: they trail the body and swing through stops
-    RX(arm.shoulder, sx + longG * -0.5 + swayA * arm.side * 0.7, 8, 0.5);
-    RZ(arm.shoulder, sz + jolt * arm.side * 0.4 + swayB * arm.side * 0.5, 8, 0.5);
-    RX(arm.elbow, ex, 9, 0.55);
-    RX(arm.wrist, wx + swayB * 0.4, 7, 0.45);
+    RX(arm.shoulder, sx + longG * -0.5 + swayA * arm.side * 0.7, oStiff(8), 0.5);
+    RZ(arm.shoulder, sz + jolt * arm.side * 0.4 + swayB * arm.side * 0.5, oStiff(8), 0.5);
+    RX(arm.elbow, ex, oStiff(9), 0.55);
+    RX(arm.wrist, wx + swayB * 0.4, oStiff(7), 0.45);
   }
   for (const [i, pole] of parts.poles.entries()) {
     // poles dangle loose behind the hands at cruise (that thrown-away flowy

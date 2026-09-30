@@ -2,7 +2,7 @@
 // Skill here changes how the run FEELS — speed, style, stumbles — but never the
 // betting result: bots pace themselves around whatever the player does.
 import * as THREE from 'three';
-import { createRider, setPose, landingBrace } from './riderMesh.js';
+import { createRider, setPose, landingBrace, ollieSpring, OLLIE_WIND } from './riderMesh.js';
 import { tubeRadii, rockPenetration } from './terrain.js';
 import { clamp, lerp } from './rng.js';
 import { SPEED_SCALE as S } from './tuning.js';
@@ -18,7 +18,11 @@ const TUCK_DRAG = 0.55;
 const BRAKE_DECEL = 14 * S; // scaled so the brake keeps its bite at any pace
 const MAX_YAW = 1.15; // radians away from straight downhill
 const POP_WINDOW = 320; // ms after tuck release that still counts at the lip
-const OLLIE_VY = 7.2; // the manual jump's kick: ~1.7 m up, ~0.95 s of air
+// the manual jump, stated as the height it clears on flat snow so the kick
+// follows from it rather than the other way round
+const OLLIE_RISE = 0.86; // metres of pop -> ~5.1 m/s of kick, ~0.68 s of air
+const OLLIE_VY = Math.sqrt(2 * AIR_G * OLLIE_RISE);
+const OLLIE_LIFE = OLLIE_WIND + 0.34; // the whole load-pop-settle animation
 const ROCK_PAD = 0.35; // half a rider's shoulders outside a boulder's outline
 
 const TRICK_NAMES = { left: 'Backside 360', right: 'Frontside 360', up: 'Front Flip', down: 'Backflip' };
@@ -104,6 +108,8 @@ export class Player {
     this._roll = new THREE.Quaternion(); // off-axis roll of a special, on the root
     this._knuckle = false; // drifting a lip: low, long, floaty flight
     this.switchRide = false; // riding backwards after a switch landing
+    this._ollieT = -1; // clock on the manual jump's load-pop-settle, -1 = idle
+    this._olliePopped = false; // has this ollie already left the snow?
     this._halfDone = false; // the half-spin back to forward has been thrown this flight
     this._lookSide = 1; // which shoulder a switch rider looks over
 
@@ -288,6 +294,41 @@ export class Player {
 
     const dir = new THREE.Vector3(Math.sin(this.travelYaw), 0, -Math.cos(this.travelYaw));
 
+    // ---- the manual jump: pop off the snow anywhere, no lip needed ----
+    // It opens the trick window on flat ground and clears an obstacle you
+    // saw late. Popping off a lip still throws harder, so this never
+    // replaces riding the terrain — and a rider who is down cannot use it.
+    //
+    // The press loads the knees first and the rider leaves the snow at the
+    // end of that load, the way an ollie actually works: the legs have to
+    // compress before they can throw. The wind-up is short enough to read
+    // as part of the jump rather than as lag, and a press up to
+    // JUMP_BUFFER early still lands on the frame it was meant for.
+    if (wantsJump && !this.airborne && !stumbling && !(this._grindT > 0)) {
+      this._ollieT = 0;
+      this._olliePopped = false;
+    }
+    if (this._ollieT >= 0) {
+      this._ollieT += dt;
+      if (!this._olliePopped && this._ollieT >= OLLIE_WIND) {
+        this._olliePopped = true;
+        if (!this.airborne && !stumbling) {
+          this.airborne = true;
+          this.vy = OLLIE_VY;
+          // the load and throw cost a little run — the same scrub a real
+          // ollie costs, so spamming it down the fall line is slower than
+          // riding it out
+          this.speed = Math.max(0, this.speed - 0.35 * S);
+          if (this.fx) {
+            this.fx.burst(this.pos, dir, { count: 26, speed: 3, up: 3.2, spread: 1.3, size: 0.22 });
+          }
+        }
+      }
+      // a load interrupted by a crash, or by the terrain launching the
+      // rider first, is abandoned rather than fired late
+      if (this._ollieT > OLLIE_LIFE || stumbling || (!this._olliePopped && this.airborne)) this._ollieT = -1;
+    }
+
     if (!this.airborne) {
       // ---- slope acceleration along the direction of travel ----
       const e = 1.6;
@@ -444,23 +485,6 @@ export class Player {
       } else {
         this.pos.set(nx, ground, nz);
         this.vy = 0;
-      }
-
-      // ---- the manual jump: pop off the snow anywhere, no lip needed ----
-      // It opens the trick window on flat ground and clears an obstacle you
-      // saw late. Popping off a lip still throws harder, so this never
-      // replaces riding the terrain — and a rider who is down cannot use it.
-      if (wantsJump && !this.airborne && !stumbling) {
-        this.airborne = true;
-        this.vy = OLLIE_VY;
-        // the crouch and spring cost a little run — the same scrub a real
-        // ollie costs, so spamming it down the fall line is slower than
-        // riding it out
-        this.speed = Math.max(0, this.speed - 0.6 * S);
-        this.pos.set(this.pos.x, this.pos.y + this.vy * dt, this.pos.z);
-        if (this.fx) {
-          this.fx.burst(this.pos, dir, { count: 26, speed: 3, up: 3.2, spread: 1.3, size: 0.22 });
-        }
       }
 
       if (!this.airborne) this._collide();
@@ -669,6 +693,9 @@ export class Player {
       knocked,
       airborne: this.airborne,
       crouch: clamp(this.landComp + this.bump, -0.2, 1), // a little negative: the rebound past standing
+      // the manual jump's load-pop-settle: positive loads the knees,
+      // negative drives the extension and the arm swing
+      ollie: this._ollieT >= 0 ? ollieSpring(this._ollieT) : 0,
       speedNorm: clamp(this.speed / (26 * S), 0, 1),
       longG: clamp(this.longA / (11 * S), -1, 1),
       jolt: this.bump * 1.3,

@@ -61,8 +61,12 @@ The racing *feels* like a skill game, but the result is drawn before the gates o
   Release your tuck right at the lip for extra pop. Land mid-rotation and you crash.
   Style points are cosmetic — they never touch the payout.
 - **Jumping** — a single tap (or `SPACE`) pops the rider off the snow anywhere, no lip needed:
-  enough air to open the trick window on a flat pitch, or to clear something you saw late.
-  It costs a little run, and riding a real lip still throws much harder.
+  a little under a metre up and two thirds of a second of hang, enough to clear something you
+  saw late or to open the trick window on a flat pitch. It costs a little run, and riding a
+  real lip still throws much harder. The press loads the knees before the rider leaves the
+  snow, the way an ollie works — the legs compress, the arms come up and fold in, then the
+  legs drive out and the arms sweep down and back through the takeoff. That wind-up is about
+  110 ms; a press up to `JUMP_BUFFER` early still fires on the frame it was meant for.
 - **Speed** — one constant, `SPEED_SCALE` in [`src/game/tuning.js`](src/game/tuning.js), sets
   how fast the whole mountain runs: the player's drag-limited top speed and the bots' paces
   together. Acceleration stays out of it, so raising the top end does not change the pull off

@@ -87,12 +87,44 @@ const jump = await page.evaluate(() => {
     return { vy: +vy.toFixed(2), rise: +((vy * vy) / (2 * AIR_G)).toFixed(2), hang: +((2 * vy) / AIR_G).toFixed(2), scrub: +scrub.toFixed(2) };
   };
   const out = {};
+  // the press loads before it pops: step past the wind-up, sampling the
+  // body as it goes so the animation can be measured, not just the arc
+  const WIND_FRAMES = Math.ceil(0.11 * 60) + 4;
+  const rideY = r.player.rider.parts.pelvis.position.y;
+  const sample = (f) => ({
+    f,
+    pelvis: +P.rider.parts.pelvis.position.y.toFixed(3),
+    shoulder: +P.rider.parts.arms[0].shoulder.rotation.x.toFixed(2),
+    elbow: +P.rider.parts.arms[0].elbow.rotation.x.toFixed(2),
+    air: P.airborne,
+  });
+  // step to the moment the rider leaves the snow
+  const windUp = () => {
+    for (let i = 0; i < WIND_FRAMES && !P.airborne; i++) window.__step(1);
+  };
+  // and the same thing sampling every frame right through the pop, so the
+  // load, the extension and the arm swing can all be measured
+  const windUpTrace = (n) => {
+    const trace = [];
+    let kick = 0;
+    for (let i = 0; i < n; i++) {
+      const wasAir = P.airborne;
+      window.__step(1);
+      if (P.airborne && !wasAir) kick = P.vy + 15 / 60; // undo the frame of gravity already applied
+      trace.push(sample(i + 1));
+    }
+    trace.kick = kick;
+    return trace;
+  };
 
   // space bar
   flat();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
-  window.__step(1);
-  out.space = { airborne: P.airborne, ...arc() };
+  const spaceTrace = windUpTrace(26);
+  out.spaceTrace = spaceTrace;
+  const kick = spaceTrace.kick;
+  out.space = { airborne: spaceTrace.some((f) => f.air), vy: +kick.toFixed(2), rise: +((kick * kick) / (2 * AIR_G)).toFixed(2), hang: +((2 * kick) / AIR_G).toFixed(2), scrub: +(20 - P.speed).toFixed(2) };
+  arc();
 
   // a single tap: down and straight back up, going nowhere
   flat();
@@ -105,48 +137,66 @@ const jump = await page.evaluate(() => {
     return ms ? new Promise((k) => setTimeout(() => { up(); k(); }, ms)) : (up(), Promise.resolve());
   };
   return tap().then(() => {
-    window.__step(1);
+    windUp();
     out.tap = { airborne: P.airborne, ...arc() };
     // a HOLD is tuck/brake, not a jump
     flat();
     return tap(0, 90, 400);
   }).then(() => {
-    window.__step(1);
+    windUp();
     out.hold = { airborne: P.airborne };
     // a SWIPE is a trick, not a jump
     flat();
     return tap(90, 0, 0);
   }).then(() => {
-    window.__step(1);
+    windUp();
     out.swipe = { airborne: P.airborne };
     // pressed mid-flight: spent, not banked for the landing
     flat();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
-    window.__step(1);
+    windUp();
     const wasAir = P.airborne;
     window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
     arc();
-    window.__step(2);
+    window.__step(WIND_FRAMES + 4);
     out.midair = { poppedFirst: wasAir, airborneAfterLanding: P.airborne };
     // down riders cannot jump
     flat();
     P.stumbleT = 1.0;
     window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
-    window.__step(1);
+    windUp();
     out.stumbled = { airborne: P.airborne };
     P.stumbleT = 0;
     // a mouse click is not a tap: on a desktop the jump is the space bar
     flat();
     return tap(0, 0, 0, 'mouse').then(() => {
-      window.__step(1);
+      windUp();
       out.click = { airborne: P.airborne };
+      out.rideY = +rideY.toFixed(3);
       return out;
     });
   });
 });
 console.log('     ', JSON.stringify(jump));
-check(jump.space.airborne && jump.space.rise > 1.2 && jump.space.hang > 0.8, `SPACE jumps: kick ${jump.space.vy} m/s -> ${jump.space.rise} m up, ${jump.space.hang}s of hang on the level (cost ${jump.space.scrub} m/s of run)`);
-check(jump.tap.airborne && jump.tap.rise > 1.2, `single tap jumps: kick ${jump.tap.vy} m/s -> ${jump.tap.rise} m up, ${jump.tap.hang}s of hang`);
+check(jump.space.airborne && jump.space.rise > 0.7 && jump.space.rise < 1.05 && jump.space.hang > 0.55, `SPACE jumps: kick ${jump.space.vy} m/s -> ${jump.space.rise} m up, ${jump.space.hang}s of hang on the level (cost ${jump.space.scrub} m/s of run)`);
+// the wind-up: the pelvis sinks into the load, the arms come up and fold in,
+// then the legs straighten and the arms sweep down as the rider leaves
+const tr = jump.spaceTrace;
+const liftOff = tr.findIndex((f) => f.air);
+const load = tr.slice(0, liftOff < 0 ? tr.length : liftOff + 1);
+const after = tr.slice(liftOff < 0 ? tr.length : liftOff);
+const lowest = Math.min(...tr.map((f) => f.pelvis));
+const armUp = Math.max(...load.map((f) => f.shoulder));
+const elbowIn = Math.max(...load.map((f) => f.elbow));
+const armDown = Math.min(...after.map((f) => f.shoulder));
+const rebound = Math.max(...after.slice(0, 12).map((f) => f.pelvis)) - lowest;
+console.log(`      pelvis ${jump.rideY} -> ${lowest.toFixed(3)} m over ${load.length} frames, then +${rebound.toFixed(3)} m`);
+console.log(`      shoulder up to ${armUp} (elbow ${elbowIn}) then down to ${armDown}`);
+check(lowest < jump.rideY - 0.12, `knees brace before the pop: pelvis drops ${(jump.rideY - lowest).toFixed(3)} m`);
+check(rebound > 0.1, `legs extend through the takeoff: pelvis springs back ${rebound.toFixed(3)} m`);
+check(armUp > 0.5 && elbowIn > 0.9, `arms come up and fold in over the load: shoulder ${armUp}, elbow ${elbowIn}`);
+check(armDown < -0.6, `arms swing down and back through the pop: shoulder reaches ${armDown}`);
+check(jump.tap.airborne && jump.tap.rise > 0.7 && jump.tap.rise < 1.05, `single tap jumps: kick ${jump.tap.vy} m/s -> ${jump.tap.rise} m up, ${jump.tap.hang}s of hang`);
 check(!jump.hold.airborne, 'a held pull is tuck/brake, not a jump');
 check(!jump.swipe.airborne, 'a swipe is a trick, not a jump');
 check(!jump.midair.airborneAfterLanding, 'a press in the air is spent, not banked for the landing');
